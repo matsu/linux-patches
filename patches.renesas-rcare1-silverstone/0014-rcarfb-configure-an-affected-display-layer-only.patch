@@ -1,0 +1,55 @@
+From 7483505b5a9a8a0ffe87829220f9da551fdb894e Mon Sep 17 00:00:00 2001
+From: Takanari Hayama <taki@igel.co.jp>
+Date: Thu, 12 Jan 2012 09:21:15 +0900
+Subject: [PATCH 14/73] rcarfb: configure an affected display layer only.
+
+It was reconfiguring all layers everytime any of layer settings is updated.
+This could cause unexpected DS2PR value.
+
+TODO: We may also need spinlock or mutex to avoid the race condition.
+---
+ drivers/video/rcarfb.c |   20 ++++++++------------
+ 1 files changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 7e8e3b6..22f3862 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -245,8 +245,6 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 
+ 	int alphamode = PnSPIM_TPOFF_PnMR;
+ 
+-	int i;
+-
+ //	printk("%s()\n",__FUNCTION__);
+ 
+ 
+@@ -270,17 +268,15 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 	dshpr &= MASK_PRIL;
+ 
+ 
+-	/* reconfigure ds2pr to show only enabled planes */
+-	ds2pr = 0;
+-	for (i=0;i<priv->dispdev->fb_num;i++) {
+-		if (!(priv->planeconfig[i].options & CARE1_PLANE_DISABLED)) {
+-			ds2pr |= ((priv->dispdev->fb_desc[i].index1+1) << (4*priv->dispdev->fb_desc[i].index1));
+-			if (care1_format_to_depth (priv->planeconfig[i].format) == 32)
+-				/* enable second plane only for "32bit" */
+-				ds2pr |= ((priv->dispdev->fb_desc[i].index2+1) << (4*priv->dispdev->fb_desc[i].index2));
+-		}
++	/* configure ds2pr to show only enabled planes */
++	ds2pr = du_read(priv, DS2PR);
++	ds2pr &= ~((0xf << (index1 << 2)) | (0xf << (index2 << 2)));
++	if (!(planeconfig->options & CARE1_PLANE_DISABLED)) {
++		ds2pr |= ((index1 + 1) << (index1 << 2));
++		if (care1_format_to_depth(planeconfig->format) == 32)
++			/* enable second plane only for "32bit" */
++			ds2pr |= ((index2 + 1) << (index2 << 2));
+ 	}
+-
+ 	du_write(priv, DS2PR, ds2pr);
+ 
+ 	if (care1_format_to_depth(planeconfig->format) == 16) {
+-- 
+1.7.0.4
+

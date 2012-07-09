@@ -1,0 +1,43 @@
+From c133a71825ebda4dbd7ba2e1ac90f7203d053ad3 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 14 Jun 2012 15:51:13 +0900
+Subject: [PATCH 57/73] rcarvin: fix condition for scaling
+
+VIN can scale captured images EXCEPT NV16 format one.
+This fixes boolean value which is the 5th argument of client_scale().
+
+FIXME: In fast, VIN can vertically scale NV16 format images.
+client_scale() should be revised for specifying vertical and horizontal
+scaling respectively.
+---
+ drivers/media/video/rcarvin.c |    7 +++----
+ 1 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 6b6c669..2c2f198 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -1711,17 +1711,16 @@ static int rcar_vin_set_fmt(struct soc_camera_device *icd,
+ 
+ 	switch (pixfmt) {
+ 	case V4L2_PIX_FMT_NV16:
+-		image_mode = true;
++		image_mode = false;
+ 		break;
+ 	default:
+-		image_mode = false;
++		image_mode = true;
+ 	}
+ 
+ 	dev_geo(dev, "4: request camera output %ux%u\n", mf.width, mf.height);
+ 
+ 	/* 5. - 9. */
+-	ret = client_scale(icd, &mf, &vin_sub_width, &vin_sub_height,
+-			   image_mode && V4L2_FIELD_NONE == field);
++	ret = client_scale(icd, &mf, &vin_sub_width, &vin_sub_height, image_mode);
+ 
+ 	dev_geo(dev, "5-9: client scale return %d\n", ret);
+ 
+-- 
+1.7.0.4
+

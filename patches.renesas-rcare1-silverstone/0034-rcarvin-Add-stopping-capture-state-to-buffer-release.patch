@@ -1,0 +1,212 @@
+From 717c385b632c3566bdf435fd607c5acc38786be4 Mon Sep 17 00:00:00 2001
+From: mukawa <mukawa@igel.co.jp>
+Date: Thu, 17 May 2012 17:14:24 +0900
+Subject: [PATCH 34/73] rcarvin: Add "stopping capture" state to buffer release processing V2
+
+This patch adds "stopping capture" status to VIN driver.
+Without this patch, the driver can only handle "start" or "stop"
+status. But when continuous capturing is used, the actual capture
+cannot be stopped at the instant the driver tries to stop it.
+So the driver needs one more "stopping" status.
+Also the driver doesn't need both of the "disable_on" or "first_op"
+states to manage the capturing status.
+This patch merges those flags to simplfy processing.
+
+Without this patch, the following issue can occur.
+In some cases, when capturing stops, all of the buffers are released
+before last the interrupt occurs. As a result, this last interrupt
+causes a NULL pointer access in the irq handler.
+After applying this patch, those buffers are released after the last
+interrupt occurs.
+
+Changes since V2:
+    - fix state transition from STOPPING to STOPPED
+    - optimize waiting for 'stopped' in rcar_vin_videobuf_release()
+---
+ drivers/media/video/rcarvin.c |   65 ++++++++++++++++++++++++++---------------
+ 1 files changed, 41 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index d2a6ba8..e5dfd8a 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -117,8 +117,6 @@
+ #define SINGLE_BUF	0
+ #define MB_MASK		0x18
+ #define CONT_TRANS	4
+-#define FLAG_ON		1
+-#define FLAG_OFF	0
+ 
+ #undef DEBUG_GEOMETRY
+ /*#define DEBUG_GEOMETRY*/
+@@ -128,6 +126,12 @@
+ #define dev_geo	dev_dbg
+ #endif
+ 
++enum rcar_vin_capture_status {
++	STOPPED,
++	RUNNING,
++	STOPPING,
++};
++
+ /* per video frame buffer */
+ struct rcar_vin_buffer {
+ 	struct videobuf_buffer vb; /* v4l buffer must be first */
+@@ -165,9 +169,8 @@ struct rcar_vin_dev {
+ 	unsigned int vb_count;
+ 	unsigned int set_pos;
+ 	unsigned int get_pos;
+-	unsigned int first_op;
+-	unsigned int disable_on;
+-	unsigned int wait_capture_stop;
++	enum rcar_vin_capture_status capture_status;
++	unsigned int wait_for_completion;
+ 	struct completion capture_stop;
+ };
+ 
+@@ -276,7 +279,6 @@ static int rcar_vin_videobuf_setup(struct videobuf_queue *vq,
+ 	}
+ 
+ 	pcdev->vb_count = *count;
+-	pcdev->first_op = FLAG_OFF;
+ 
+ 	dev_dbg(icd->dev.parent, "count=%d, size=%d\n", *count, *size);
+ 
+@@ -457,6 +459,10 @@ static void rcar_vin_deinit_capture(struct rcar_vin_dev *pcdev)
+ 
+ 	/* disable capture (release DMA buffer), reset */
+ 	vin_write(pcdev, V0MC, vin_read(pcdev, V0MC) & ~VIN_VNMC_ME);
++
++	/* update the status if stopped already */
++	if ((vin_read(pcdev, V0MS) & VIN_VNMS_CA) == 0)
++		pcdev->capture_status = STOPPED;
+ }
+ 
+ static int rcar_vin_videobuf_prepare(struct videobuf_queue *vq,
+@@ -550,10 +556,10 @@ static void rcar_vin_videobuf_queue(struct videobuf_queue *vq,
+ 			pcdev->mb_cnt++;
+ 		}
+ 
+-		if ((pcdev->first_op == FLAG_OFF) && ((pcdev->mb_cnt +
+-			 pcdev->queue_cnt) >= CONT_TRANS)) {
++		if ((pcdev->capture_status != RUNNING) &&
++			((pcdev->mb_cnt + pcdev->queue_cnt) >= CONT_TRANS)) {
++			pcdev->capture_status = RUNNING;
+ 			rcar_vin_capture(pcdev);
+-			pcdev->first_op = FLAG_ON;
+ 		}
+ 	} else { /* single transfer */
+ 		if (pcdev->mb_cnt >= 1) { /* add queue */
+@@ -565,10 +571,10 @@ static void rcar_vin_videobuf_queue(struct videobuf_queue *vq,
+ 			vin_write(pcdev, V0MB1, phys_addr_top);
+ 			pcdev->queue_buf[SINGLE_BUF] = queue_vb;
+ 			pcdev->mb_cnt++;
++			pcdev->capture_status = RUNNING;
+ 			rcar_vin_capture(pcdev);
+ 		}
+ 	}
+-	pcdev->disable_on = 0;
+ }
+ 
+ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+@@ -581,15 +587,20 @@ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+ 
+ 	spin_lock_irqsave(&pcdev->lock, flags);
+ 
+-	if (pcdev->first_op == FLAG_ON) {
+-		rcar_vin_deinit_capture(pcdev);
+-		pcdev->wait_capture_stop = FLAG_ON;
+-		if ((vin_read(pcdev, V0MS) & VIN_VNMS_CA) == VIN_VNMS_CA) {
++	while (pcdev->capture_status != STOPPED) {
++
++		/* issue stop if running */
++		if (pcdev->capture_status == RUNNING) {
++			pcdev->capture_status = STOPPING;
++			rcar_vin_deinit_capture(pcdev);
++		}
++
++		if (pcdev->capture_status == STOPPING) {
++			pcdev->wait_for_completion = 1;
+ 			spin_unlock_irqrestore(&pcdev->lock, flags);
+ 			wait_for_completion(&pcdev->capture_stop);
+ 			spin_lock_irqsave(&pcdev->lock, flags);
+ 		}
+-		pcdev->first_op = FLAG_OFF;
+ 	}
+ 
+ 	for (i = 0; i < MB_NUM; i++) {
+@@ -633,12 +644,14 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 	status_of_int = vin_read(pcdev, V0INTS);
+ 	vin_write(pcdev, V0INTS, status_of_int);
+ 
+-	if (pcdev->wait_capture_stop == FLAG_ON) { /* for wait_for_completion
+-							 in release func */
+-		complete(&pcdev->capture_stop);
+-		pcdev->wait_capture_stop = FLAG_OFF;
++	if ((pcdev->capture_status == STOPPING) &&
++	    ((vin_read(pcdev, V0MS) & VIN_VNMS_CA) == 0)) {
++		pcdev->capture_status = STOPPED;
++		if (pcdev->wait_for_completion == 1) {
++			pcdev->wait_for_completion = 0;
++			complete(&pcdev->capture_stop);
++		}
+ 	} else if (pcdev->vb_count >= CONT_TRANS) { /* continuous transfer */
+-
+ 		ms_fbs = (vin_get_status(pcdev) & MB_MASK) >> 3;
+ 
+ 		/* wait until get_pos and mb_status become equal */
+@@ -668,13 +681,13 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 				pcdev->mb_cnt++;
+ 				/* stop operation */
+ 				if (pcdev->queue_cnt == 0) {
++					pcdev->capture_status = STOPPING;
+ 					rcar_vin_deinit_capture(pcdev);
+-					pcdev->disable_on = FLAG_ON;
+-					pcdev->first_op = FLAG_OFF;
+ 				}
+ 			}
+ 		}
+ 	} else { /* single transfer operation */
++		pcdev->capture_status = STOPPED;
+ 		pcdev->queue_buf[SINGLE_BUF]->field_count++;
+ 		pcdev->queue_buf[SINGLE_BUF]->state = VIDEOBUF_DONE;
+ 		do_gettimeofday(&pcdev->queue_buf[SINGLE_BUF]->ts);
+@@ -691,6 +704,7 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 			phys_addr_top =
+ 				 videobuf_to_dma_contig(next_queue_vb);
+ 			vin_write(pcdev, V0MB1, phys_addr_top);
++			pcdev->capture_status = RUNNING;
+ 			rcar_vin_capture(pcdev);
+ 			pcdev->mb_cnt++;
+ 		}
+@@ -747,6 +761,8 @@ static void rcar_vin_remove_device(struct soc_camera_device *icd)
+ 
+ 	rcar_vin_soft_reset(pcdev);
+ 
++	pcdev->capture_status = STOPPED;
++
+ 	/* make sure active buffer is canceled */
+ 	spin_lock_irqsave(&pcdev->lock, flags);
+ 
+@@ -1532,7 +1548,8 @@ static int rcar_vin_set_crop(struct soc_camera_device *icd,
+ 
+ 	/* Restore capture */
+ 	for (i = 0; i < MB_NUM; i++) {
+-		if ((pcdev->queue_buf[i]) && (pcdev->disable_on == 0)) {
++		if ((pcdev->queue_buf[i]) &&
++		    (pcdev->capture_status == STOPPED)) {
+ 			vnmc |= VIN_VNMC_ME;
+ 			break;
+ 		}
+@@ -2031,7 +2048,7 @@ static int __devinit rcar_vin_probe(struct platform_device *pdev)
+ 	pcdev->base = base;
+ 	pcdev->video_limit = 0; /* only enabled if second resource exists */
+ 	pcdev->mb_cnt = 0;
+-	pcdev->disable_on = FLAG_OFF;
++	pcdev->capture_status = STOPPED;
+ 	pcdev->queue_cnt = 0;
+ 	pcdev->set_pos = 0;
+ 	pcdev->get_pos = 0;
+-- 
+1.7.0.4
+

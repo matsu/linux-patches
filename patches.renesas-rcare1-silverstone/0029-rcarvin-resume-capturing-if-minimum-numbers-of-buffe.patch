@@ -1,0 +1,28 @@
+From 058aef6151767a5f19587e11c68cfcd8993bdb99 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Fri, 18 May 2012 17:44:15 +0900
+Subject: [PATCH 29/73] rcarvin: resume capturing if minimum numbers of buffers queued
+
+This change may be needed for user applications which do NOT
+necessarily queue ALL of the buffers, the gstreamer v4l2 plugin
+for example.
+---
+ drivers/media/video/rcarvin.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 8953586..d9ea37d 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -560,7 +560,7 @@ static void rcar_vin_videobuf_queue(struct videobuf_queue *vq,
+ 		}
+ 
+ 		if ((pcdev->first_op == FLAG_OFF) && ((pcdev->mb_cnt +
+-			 pcdev->queue_cnt) == pcdev->vb_count)) {
++			 pcdev->queue_cnt) >= CONT_TRANS)) {
+ 			rcar_vin_capture(pcdev);
+ 			pcdev->first_op = FLAG_ON;
+ 		}
+-- 
+1.7.0.4
+

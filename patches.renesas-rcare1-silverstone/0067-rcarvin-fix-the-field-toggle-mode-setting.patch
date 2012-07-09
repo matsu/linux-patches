@@ -1,0 +1,46 @@
+From ac46520e9ee0aac92d9a576822d04de676a547c9 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 20 Jun 2012 17:41:24 +0900
+Subject: [PATCH 67/73] rcarvin: fix the field toggle mode setting
+
+VIN requires field switching event to control capturing although
+progressive image has no field. The VSYNC field toggle mode could
+use VSYNC counter as a substitude for field switching event.
+This should be enabled only for progressive image.
+---
+ drivers/media/video/rcarvin.c |   13 +------------
+ 1 files changed, 1 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 360d8b2..bb6bb80 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -999,24 +999,13 @@ static int rcar_vin_set_bus_param(struct soc_camera_device *icd,
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	value = 0;
++	value = (pcdev->field == V4L2_FIELD_NONE) ? VIN_VNDMR2_FTEV : 0;
+ 
+ 	value |= common_flags & SOCAM_VSYNC_ACTIVE_LOW ?
+ 	  VIN_VNDMR2_VPS_ACTIVE_LOW : VIN_VNDMR2_VPS_ACTIVE_HIGH;
+ 	value |= common_flags & SOCAM_HSYNC_ACTIVE_LOW ?
+ 	  VIN_VNDMR2_HPS_ACTIVE_LOW : VIN_VNDMR2_HPS_ACTIVE_HIGH;
+ 
+-	switch (pcdev->field) {
+-	case V4L2_FIELD_INTERLACED_TB:
+-		value |= VIN_VNDMR2_FTEV;
+-		break;
+-	case V4L2_FIELD_INTERLACED_BT:
+-		value |= (VIN_VNDMR2_FPS | VIN_VNDMR2_FTEV);
+-		break;
+-	default:
+-		value = 0;
+-		break;
+-	}
+ 	/* set Data Mode Register2 */
+ 	vin_write(pcdev, V0DMR2, value);
+ 
+-- 
+1.7.0.4
+

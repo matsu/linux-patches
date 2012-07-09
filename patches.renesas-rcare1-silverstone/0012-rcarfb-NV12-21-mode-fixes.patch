@@ -1,0 +1,279 @@
+From 79ed47c86f3e6174558cce69924d9fd67e0431df Mon Sep 17 00:00:00 2001
+From: Takanari Hayama <taki@igel.co.jp>
+Date: Mon, 9 Jan 2012 13:33:37 +0900
+Subject: [PATCH 12/73] rcarfb: NV12/21 mode fixes.
+
+Updates from Andi on 2011-12-29.
+---
+ drivers/video/rcarfb.c |  116 ++++++++++++++++++++++++++++++++++++------------
+ include/video/rcarfb.h |   20 ++++++---
+ 2 files changed, 101 insertions(+), 35 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 9fa3f91..04ebb03 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -127,7 +127,10 @@ static int care1_format_to_depth(CarE1PlaneFormat format)
+ {
+ 	switch (format) {
+ 	case CARE1_FORMAT_ARGB:
++	case CARE1_FORMAT_NV12: // FIXME: these are not actually 32 bit but require 2 planes
++	case CARE1_FORMAT_NV21: //        make them 32 to not break other logic
+ 		return 32;
++
+ 	case CARE1_FORMAT_RGB16:
+ 	case CARE1_FORMAT_UYVY:
+ 	case CARE1_FORMAT_YUY2:
+@@ -246,7 +249,8 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 
+ //	printk("%s()\n",__FUNCTION__);
+ 
+-	if ((planeconfig->options & CARE1_PLANE_OPACITY ) ||
++
++     if ((planeconfig->options & CARE1_PLANE_OPACITY ) ||
+ 	    (planeconfig->options & CARE1_PLANE_ALPHACHANNEL && planeconfig->format == CARE1_FORMAT_ARGB ))
+ 		alphamode = PnSPIM_TPOFF_PnMR | PnSPIM_ALPON_PnMR;
+ 
+@@ -271,8 +275,8 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 	for (i=0;i<priv->dispdev->fb_num;i++) {
+ 		if (!(priv->planeconfig[i].options & CARE1_PLANE_DISABLED)) {
+ 			ds2pr |= ((priv->dispdev->fb_desc[i].index1+1) << (4*priv->dispdev->fb_desc[i].index1));
+-			if (priv->planeconfig[i].format == CARE1_FORMAT_ARGB)
+-				/* enable second plane only for ARGB */
++			if (care1_format_to_depth (priv->planeconfig[i].format) == 32)
++				/* enable second plane only for "32bit" */
+ 				ds2pr |= ((priv->dispdev->fb_desc[i].index2+1) << (4*priv->dispdev->fb_desc[i].index2));
+ 		}
+ 	}
+@@ -281,17 +285,51 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 
+ 	if (care1_format_to_depth(planeconfig->format) == 16) {
+ 		/* In case of 16BPP, use the plane1 */
+-		du_write(priv, DEFR4, BPP32_DEFR4);
++		du_write(priv, DEFR4, BPP32_DEFR4);  // FIXME: this is not correct if ALL planes are 16 bit
+ 		du_write(priv, PnDDCR(index1), BPP16_DDCR);
+ 
+ 		dppr &= ~mask1;
+ 		du_write(priv, DPPR, dppr | ((DPE | index1) << shift1));/* plane1 */
+-		du_write(priv, DSHPR, (dshpr | BPP32_PRIL_DSHPR));
++		du_write(priv, DSHPR, (dshpr | BPP32_PRIL_DSHPR)); // FIXME: this is not correct if ALL planes are 16 bit
++
++		du_write(priv, PnDDCR2(index1), 0); /* turn yuv off */   
++		du_write(priv, PnDDCR2(index2), 0);
++
+ 	} else {
+ 		/* In case of 32BPP, use the plane1 and plane2 */
+ 		du_write(priv, DEFR4, BPP32_DEFR4);
+-		du_write(priv, PnDDCR(index1), BPP32AR_DDCR);
+-		du_write(priv, PnDDCR(index2), BPP32GB_DDCR);
++		switch (planeconfig->format) {
++		case CARE1_FORMAT_NV12:
++			du_write(priv, PnDDCR(index1), 0); /* turn rgb off */
++			du_write(priv, PnDDCR(index2), 0);
++
++			du_write(priv, PnDDCR2(index1), CODE_DDCR2 | PnDIVY_DDCR2);
++			du_write(priv, PnDDCR2(index2), CODE_DDCR2 | PnY420_DDCR2 | PnNV12_DDCR2 | PnDIVU_DDCR2);			
++
++			du_write(priv, PnMR(index2), PnBM_MD_PnMR | PnDDDF_YC_PnMR | PnYCDF_UYVY_PnMR | alphamode);
++
++			break;
++		case CARE1_FORMAT_NV21:
++			du_write(priv, PnDDCR(index1), 0); /* turn rgb off */
++			du_write(priv, PnDDCR(index2), 0);
++
++			du_write(priv, PnDDCR2(index1), CODE_DDCR2 | PnDIVY_DDCR2);			
++			du_write(priv, PnDDCR2(index2), CODE_DDCR2 | PnY420_DDCR2 | PnNV21_DDCR2 | PnDIVU_DDCR2);
++
++			du_write(priv, PnMR(index2), PnBM_MD_PnMR | PnDDDF_YC_PnMR | PnYCDF_YUYV_PnMR | alphamode);
++
++			break;
++		default:
++			du_write(priv, PnDDCR2(index1), 0); /* turn yuv off */
++			du_write(priv, PnDDCR2(index2), 0);
++
++			du_write(priv, PnDDCR(index1), BPP32AR_DDCR);
++			du_write(priv, PnDDCR(index2), BPP32GB_DDCR);
++			
++			du_write(priv, PnMR(index2), (PnBM_MD_PnMR | PnDDDF_16BPP_PnMR | alphamode));
++
++			break;
++		}
+ 
+ 		dppr &= ~(mask1 | mask2);
+ 		du_write(priv, DPPR, dppr | ((DPE | index2) << shift1) | ((DPE | index1) << shift2));/* plane1&2 */
+@@ -305,13 +343,15 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 
+ 	switch (planeconfig->format) {
+ 	case CARE1_FORMAT_UYVY:
+-		du_write(priv, PnMR(index1), PnBM_MD_PnMR | MODE_UYVY_PnMR | alphamode);
++		du_write(priv, PnMR(index1), PnBM_MD_PnMR | PnDDDF_YC_PnMR | PnYCDF_UYVY_PnMR | alphamode);
+ 		break;
+ 	case CARE1_FORMAT_YUY2:
+-		du_write(priv, PnMR(index1), PnBM_MD_PnMR | MODE_YUY2_PnMR | alphamode);
++	case CARE1_FORMAT_NV12:
++	case CARE1_FORMAT_NV21:
++		du_write(priv, PnMR(index1), PnBM_MD_PnMR | PnDDDF_YC_PnMR | PnYCDF_YUYV_PnMR | alphamode);
+ 		break;
+ 	default:
+-		du_write(priv, PnMR(index1), PnBM_MD_PnMR | MODE_16BPP_PnMR | alphamode);
++		du_write(priv, PnMR(index1), PnBM_MD_PnMR | PnDDDF_16BPP_PnMR | alphamode);
+ 	}
+ 
+ 	du_write(priv, PnMWR(index1), planeconfig->width);
+@@ -334,19 +374,21 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 	priv->plane[index1].btr = DEFAULT_PnBTR;
+ 	priv->plane[index1].mlr = DEFAULT_PnMLR;
+ 
+-	/* set register */
+-	du_set_plane(priv, index1);
+ 
+ 	priv->plane[index1].plane_pixel = care1_format_to_depth(planeconfig->format);
+ 	priv->plane[index1].mwx = planeconfig->pitch;
+ 	priv->plane[index1].disp_area = DISPLAY_AREA0;
+ 	priv->plane[index1].disp_area0_base =
+ 		 (planeconfig->phys & PnDSA_MASK);
+-//	priv->plane[index1].disp_area1_base =
+-//		 ((planeconfig->phys + offset) & PnDSA_MASK);
++
++	priv->plane[index1].disp_area1_base = priv->plane[index1].disp_area0_base;
++
++	/* set register */
++	du_set_plane(priv, index1);
++
+ 	priv->plane_area |= plane_bit1;
+ 
+-	if (planeconfig->format == CARE1_FORMAT_ARGB) {
++	if (care1_format_to_depth(planeconfig->format) == 32) { /* includes NV12 & NV21 */
+ 
+ 		/* for plane2 */
+ 		du_write(priv, PnMWR(index2), planeconfig->width);
+@@ -357,8 +399,8 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 		//	du_write(priv, PnMR(index2), (PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | PnSPIM_TPOFF_PnMR));
+ 		//}
+ 		//else {
+-			du_write(priv, PnMR(index1), (PnBM_MD_PnMR | PnDDDF_16BPP_PnMR | alphamode));
+-			du_write(priv, PnMR(index2), (PnBM_MD_PnMR | PnDDDF_16BPP_PnMR | alphamode));
++		//	du_write(priv, PnMR(index1), (PnBM_MD_PnMR | PnDDDF_16BPP_PnMR | alphamode));
++		//	du_write(priv, PnMR(index2), (PnBM_MD_PnMR | PnDDDF_16BPP_PnMR | alphamode));
+ 		//}
+ 
+ 		/* use the value of plane1 */
+@@ -367,6 +409,7 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 		priv->plane[index2].disp.sy = planeconfig->height;
+ 		priv->plane[index2].moni.px = planeconfig->x;
+ 		priv->plane[index2].moni.py = planeconfig->y;
++
+ 		priv->plane[index2].disp_area0_base =
+ 			 (planeconfig->phys & PnDSA_MASK);
+ 		//priv->plane[index2].disp_area1_base =
+@@ -379,16 +422,22 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 		priv->plane[index2].btr = DEFAULT_PnBTR;
+ 		priv->plane[index2].mlr = DEFAULT_PnMLR;
+ 
+-		/* set register */
+-		du_set_plane(priv, index2);
+-
++		
+ 		priv->plane[index2].plane_pixel = care1_format_to_depth(planeconfig->format);
+ 		priv->plane[index2].mwx = planeconfig->pitch;
+ 		priv->plane[index2].disp_area = DISPLAY_AREA0;
+-		priv->plane[index2].disp_area0_base =
+-			 (planeconfig->phys & PnDSA_MASK);
+-		//priv->plane[index2].disp_area1_base =
+-		//	 ((planeconfig->phys + offset) & PnDSA_MASK);
++
++		if ((planeconfig->format == CARE1_FORMAT_NV12) || (planeconfig->format == CARE1_FORMAT_NV21))
++			priv->plane[index2].disp_area0_base = ((planeconfig->phys+planeconfig->pitch*planeconfig->height) & PnDSA_MASK);
++		
++		else
++			priv->plane[index2].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
++
++		priv->plane[index2].disp_area1_base = priv->plane[index2].disp_area0_base;
++
++		/* set register */
++		du_set_plane(priv, index2);
++
+ 		priv->plane_area |= plane_bit2;
+ 	}
+ 	else
+@@ -574,6 +623,7 @@ static int du_set_disp_timing(struct rcar_du_priv *priv, int mode)
+ 	du_write(priv, BPOR2, DEFAULT_BPOR);
+ 	/* Background Plane Output */
+ 	du_write(priv, DOOR2, DEFAULT_DOOR);
++	du_write(priv, DOOR, DEFAULT_DOOR);
+ 
+ 
+ 	du_write(priv, DAPCR, 0x77730011);
+@@ -709,12 +759,20 @@ static int du_update_displaystart(int fb_num, struct rcar_du_priv *priv, CarE1Pl
+ 
+ 	// FIXME: set one plane only if 16bit only
+ 	priv->plane[index1].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
+-	priv->plane[index2].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
+ 
+-	du_write(priv, P1DSA0R + (index1   * PLANE_OFF), planeconfig->phys);
+-	du_write(priv, P1DSA0R + ((index2) * PLANE_OFF), planeconfig->phys);
+-	du_write(priv, P1DSA1R + (index1   * PLANE_OFF), planeconfig->phys);
+-	du_write(priv, P1DSA1R + ((index2) * PLANE_OFF), planeconfig->phys);
++	if (planeconfig->format == CARE1_FORMAT_NV12 || planeconfig->format == CARE1_FORMAT_NV21) {
++		priv->plane[index2].disp_area0_base = ((planeconfig->phys+planeconfig->pitch*planeconfig->height) & PnDSA_MASK);
++		du_write(priv, P1DSA0R + (index2 * PLANE_OFF), (planeconfig->phys+planeconfig->pitch*planeconfig->height));
++		du_write(priv, P1DSA1R + (index2 * PLANE_OFF), (planeconfig->phys+planeconfig->pitch*planeconfig->height));
++	}
++	else {
++		priv->plane[index2].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
++		du_write(priv, P1DSA0R + (index2 * PLANE_OFF), planeconfig->phys);
++		du_write(priv, P1DSA1R + (index2 * PLANE_OFF), planeconfig->phys);
++	}
++
++	du_write(priv, P1DSA0R + (index1 * PLANE_OFF), planeconfig->phys);
++	du_write(priv, P1DSA1R + (index1 * PLANE_OFF), planeconfig->phys);
+ 
+ 	/* Change frame buffer */
+ 	tmp = du_read(priv, PnMR(index1));	// FIXME: only for one plane?
+diff --git a/include/video/rcarfb.h b/include/video/rcarfb.h
+index 443f2e2..8b3a5fd 100644
+--- a/include/video/rcarfb.h
++++ b/include/video/rcarfb.h
+@@ -444,15 +444,20 @@ struct rcar_reso_info {
+ #define PnVISL_VIN0_PnMR	(0<<26)	/* use Video Input 0 */
+ #define PnVISL_VIN1_PnMR	(1<<26)	/* use Video Input 1 */
+ 
+-#define MODE_16BPP_PnMR		(PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | \
+-				 PnSPIM_TPOFF_PnMR)
++/* 
++ * ANDI: disabled these
++ *
++#define MODE_16BPP_PnMR	(PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | \
++				          PnSPIM_TPOFF_PnMR)
+ #define MODE_RGB_PnMR		(PnDDDF_ARGB_PnMR | PnBM_MD_PnMR | \
+ 				 PnSPIM_TPOFF_PnMR)
+ #define MODE_UYVY_PnMR		(PnDDDF_YC_PnMR | PnYCDF_UYVY_PnMR | PnBM_MD_PnMR | \
+-				           PnSPIM_TPOFF_PnMR)
++   			           PnSPIM_TPOFF_PnMR)
+ #define MODE_YUY2_PnMR		(PnDDDF_YC_PnMR | PnYCDF_YUYV_PnMR | PnBM_MD_PnMR | \
+-				           PnSPIM_TPOFF_PnMR)
+-
++ 
++                               PnSPIM_TPOFF_PnMR)
++ 
++*/
+ #define PnMWR(n)	(0x00104 + 0x100 * (n)) /* plane n */
+ 
+ #define P1MWR		0x00104
+@@ -508,9 +513,12 @@ struct rcar_reso_info {
+ #define BPP32AR_DDCR	(CODE_DDCR | PnLRGB0_DDCR)
+ #define BPP32GB_DDCR	(CODE_DDCR | PnLRGB1_DDCR)
+ 
++#define PnDDCR2(n)	(0x00188 + 0x100 * (n)) /* plane n */
++
+ #define P1DDCR2		0x00188
+-#define CODE_DDCR2	(0x7775<<16)
++#define CODE_DDCR2	(0x7776<<16)
+ #define PnNV21_DDCR2	(1<<5)
++#define PnNV12_DDCR2	(0<<5)
+ #define PnY420_DDCR2	(1<<4)
+ #define PnDIVU_DDCR2	(1<<1)
+ #define PnDIVY_DDCR2	(1<<0)
+-- 
+1.7.0.4
+

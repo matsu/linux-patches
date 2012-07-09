@@ -1,0 +1,49 @@
+From d4a93f4c279adfc72f49b29acf9bfa550237d3c2 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Mon, 4 Jun 2012 19:33:01 +0900
+Subject: [PATCH 49/73] rcarvin: swap order of the MC and the FC register settings for starting capturing
+
+This swap follows an instruction written in the H/W manual pp.8.2.1-41.
+It could resolve an issue that the 1st capturing in the single mode might
+be failed occasionally.
+---
+ drivers/media/video/rcarvin.c |   16 ++++++++--------
+ 1 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index ff9947a..cfc27c3 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -449,14 +449,6 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		break;
+ 	}
+ 
+-	if (is_continuous_transfer(pcdev)) {
+-		/* single transfer ON */
+-		vin_write(pcdev, V0FC, VIN_VNFC_C_FRAME);
+-	} else {
+-		/* continuous transfer ON */
+-		vin_write(pcdev, V0FC, VIN_VNFC_S_FRAME);
+-	}
+-
+ 	/* enable interrupt */
+ 	vin_write(pcdev, V0IE, VIN_VNIE_MASK);
+ 
+@@ -464,6 +456,14 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 	vin_write(pcdev, V0DMR, dmr);
+ 	vin_write(pcdev, V0MC, mc | VIN_VNMC_ME);
+ 
++	if (is_continuous_transfer(pcdev)) {
++		/* continuous transfer ON */
++		vin_write(pcdev, V0FC, VIN_VNFC_C_FRAME);
++	} else {
++		/* single transfer ON */
++		vin_write(pcdev, V0FC, VIN_VNFC_S_FRAME);
++	}
++
+ 	return ret;
+ }
+ 
+-- 
+1.7.0.4
+

@@ -1,0 +1,109 @@
+From 6919f276954b6a86257cc68327170c7de171cbd3 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 13 Jun 2012 18:13:49 +0900
+Subject: [PATCH 56/73] rcarvin: support 16-bit bus, BT.1358 YUV 4:2:2 input
+
+---
+ drivers/media/video/rcarvin.c |   37 ++++++++++++++++++++++++++-----------
+ 1 files changed, 26 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index b624402..6b6c669 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -333,6 +333,7 @@ static void free_buffer(struct videobuf_queue *vq,
+ #define VIN_VNMC_FOC         (0x00200000) /* Field Order Control */
+ #define VIN_VNMC_YCAL        (0x00080000) /* YCbCr-422 input data ALignment */
+ #define VIN_VNMC_VUP         (0x00000400) /* Vin register UPdate control */
++#define VIN_VNMC_INF_YUV16   (0x00050000) /* ITU-R BT.1358/16bit/YUV-422 */
+ 
+ #define VIN_VNMC_IM_MASK     (0x00000018) /* Interlace Mode */
+ #define VIN_VNMC_IM_ODD      (0x00000000)
+@@ -389,7 +390,7 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 	struct soc_camera_device *icd = pcdev->icd;
+ 	struct rcar_vin_cam *cam = icd->host_priv;
+ 	u32 status_of_int;
+-	u32 field, mc, dmr;
++	u32 mc, dmr;
+ 	int ret = 0;
+ 
+ 	status_of_int = vin_read(pcdev, V0INTS);
+@@ -417,20 +418,33 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 
+ 	switch (pcdev->field) {
+ 	case V4L2_FIELD_TOP:
+-		field = VIN_VNMC_IM_ODD;
++		mc = VIN_VNMC_IM_ODD;
+ 		break;
+ 	case V4L2_FIELD_BOTTOM:
+-		field = VIN_VNMC_IM_EVEN;
++		mc = VIN_VNMC_IM_EVEN;
+ 		break;
+ 	case V4L2_FIELD_INTERLACED:
+ 	case V4L2_FIELD_INTERLACED_TB:
+-		field = VIN_VNMC_IM_FULL;
++		mc = VIN_VNMC_IM_FULL;
+ 		break;
+ 	case V4L2_FIELD_INTERLACED_BT:
+-		field = VIN_VNMC_IM_FULL;
++		mc = VIN_VNMC_IM_FULL;
+ 		break;
+ 	default:
+-		field = VIN_VNMC_IM_ODD;
++		mc = VIN_VNMC_IM_ODD;
++		break;
++	}
++
++	/* set input interface */
++	switch (icd->current_fmt->code) {
++	case V4L2_MBUS_FMT_YUYV8_1X16_BE:
++		/* BT.1358 16bit YCbCr-422 */
++		mc |= VIN_VNMC_INF_YUV16;
++		break;
++	case V4L2_MBUS_FMT_YUYV8_2X8_BE:
++		/* BT.656 8bit YCbCr-422 */
++		/* FIXME: BT.601 8bit YCbCr-422 must be also supported. */
++	default:
+ 		break;
+ 	}
+ 
+@@ -440,23 +454,23 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		vin_write(pcdev, V0UVAOF,
+ 			  ((cam->width * cam->height) + 0x7f) & ~0x7f);
+ 		dmr = VIN_VNDMR_DTMD_YCSEP;
+-		mc = field | VIN_VNMC_VUP | VIN_VNMC_BPS;
++		mc |= VIN_VNMC_VUP | VIN_VNMC_BPS;
+ 		break;
+ 	case V4L2_PIX_FMT_YUYV:
+ 		dmr = VIN_VNDMR_BPSM;
+-		mc = field | VIN_VNMC_VUP | VIN_VNMC_BPS;
++		mc |= VIN_VNMC_VUP | VIN_VNMC_BPS;
+ 		break;
+ 	case V4L2_PIX_FMT_UYVY:
+ 		dmr = 0;
+-		mc = field | VIN_VNMC_VUP | VIN_VNMC_BPS;
++		mc |= VIN_VNMC_VUP | VIN_VNMC_BPS;
+ 		break;
+ 	case V4L2_PIX_FMT_RGB555X:
+ 		dmr = VIN_VNDMR_DTMD_ARGB1555;
+-		mc = field | VIN_VNMC_VUP;
++		mc |= VIN_VNMC_VUP;
+ 		break;
+ 	case V4L2_PIX_FMT_RGB565:
+ 		dmr = 0;
+-		mc = field | VIN_VNMC_VUP;
++		mc |= VIN_VNMC_VUP;
+ 		break;
+ 	default:
+ 	printk(KERN_ALERT "<WARNNING msg=\"Invalid fourcc\" fourcc=\"0x%x\"/>\n",
+@@ -1141,6 +1155,7 @@ static int rcar_vin_get_formats(struct soc_camera_device *icd, unsigned int idx,
+ 		cam->extra_fmt = NULL;
+ 
+ 	switch (code) {
++	case V4L2_MBUS_FMT_YUYV8_1X16_BE:
+ 	case V4L2_MBUS_FMT_YUYV8_2X8_LE:
+ 	case V4L2_MBUS_FMT_YUYV8_2X8_BE:
+ 		if (cam->extra_fmt)
+-- 
+1.7.0.4
+

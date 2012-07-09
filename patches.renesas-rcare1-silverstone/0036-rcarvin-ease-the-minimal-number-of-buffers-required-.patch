@@ -1,0 +1,114 @@
+From 56e2126fa42a94641d9e25bb13905d7e1fa182b7 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 23 May 2012 09:54:06 +0900
+Subject: [PATCH 36/73] rcarvin: ease the minimal number of buffers required for starting/resuming the continuous transfer
+
+This changes the minimal number of buffers required for starting/resuming
+the continuous transfer from four to three. The change could have effect on
+the issue that some of applications, such as gstreamer, may not always push
+all of buffers which prepared by VIDIOC_REQBUFS.
+
+Notice, the minimal number of buffers required for ENABLING the continuous
+transfer has not been changed. The continuous transfer could be enabled
+only if four or more buffers are prepared by VIDIOC_REQBUFS.
+---
+ drivers/media/video/rcarvin.c |   22 +++++++---------------
+ 1 files changed, 7 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index da12e83..cf8f313 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -165,7 +165,6 @@ struct rcar_vin_dev {
+ 
+ 	struct videobuf_buffer *queue_buf[MB_NUM];
+ 	unsigned int mb_cnt;
+-	unsigned int queue_cnt;
+ 	unsigned int vb_count;
+ 	unsigned int set_pos;
+ 	unsigned int get_pos;
+@@ -544,7 +543,6 @@ static void rcar_vin_videobuf_queue(struct videobuf_queue *vq,
+ 	if (pcdev->vb_count >= CONT_TRANS) { /* continuous transfer */
+ 		if (pcdev->mb_cnt >= MB_NUM) { /* add queue */
+ 			list_add_tail(&vb->queue, &pcdev->capture);
+-			pcdev->queue_cnt++;
+ 		} else {
+ 			queue_vb = vb;
+ 			phys_addr_top = videobuf_to_dma_contig(queue_vb);
+@@ -558,14 +556,13 @@ static void rcar_vin_videobuf_queue(struct videobuf_queue *vq,
+ 		}
+ 
+ 		if ((pcdev->capture_status != RUNNING) &&
+-			((pcdev->mb_cnt + pcdev->queue_cnt) >= CONT_TRANS)) {
++			(pcdev->mb_cnt >= MB_NUM)) {
+ 			pcdev->capture_status = RUNNING;
+ 			rcar_vin_capture(pcdev);
+ 		}
+ 	} else { /* single transfer */
+ 		if (pcdev->mb_cnt >= 1) { /* add queue */
+ 			list_add_tail(&vb->queue, &pcdev->capture);
+-			pcdev->queue_cnt++;
+ 		} else {
+ 			queue_vb = vb;
+ 			phys_addr_top = videobuf_to_dma_contig(queue_vb);
+@@ -616,11 +613,10 @@ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+ 				break;
+ 			}
+ 		}
+-	} else if (!list_empty(&vb->queue) && (vb->state == VIDEOBUF_QUEUED)) {
++	} else if ((vb->state == VIDEOBUF_QUEUED) && !list_empty(&vb->queue)) {
+ 		vb->state = VIDEOBUF_ERROR;
+ 		list_del_init(&vb->queue);
+ 	}
+-	pcdev->queue_cnt = 0;
+ 
+ 	spin_unlock_irqrestore(&pcdev->lock, flags);
+ 
+@@ -669,11 +665,14 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 			/* increment get_pos  */
+ 			pcdev->get_pos = (pcdev->get_pos + 1) % MB_NUM;
+ 			/* set next frame addr */
+-			if (!list_empty(&pcdev->capture)) {
++			if (list_empty(&pcdev->capture)) {
++				/* stop operation */
++				pcdev->capture_status = STOPPING;
++				rcar_vin_deinit_capture(pcdev);
++			} else {
+ 				next_queue_vb = list_entry(pcdev->capture.next,
+ 					 struct videobuf_buffer, queue);
+ 				list_del_init(&next_queue_vb->queue);
+-				pcdev->queue_cnt--;
+ 				pcdev->queue_buf[pcdev->set_pos]
+ 					 = next_queue_vb;
+ 				pcdev->queue_buf[pcdev->set_pos]->state = VIDEOBUF_ACTIVE;
+@@ -684,11 +683,6 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 				/* increment set_pos */
+ 				pcdev->set_pos = (pcdev->set_pos + 1) % MB_NUM;
+ 				pcdev->mb_cnt++;
+-				/* stop operation */
+-				if (pcdev->queue_cnt == 0) {
+-					pcdev->capture_status = STOPPING;
+-					rcar_vin_deinit_capture(pcdev);
+-				}
+ 			}
+ 		}
+ 	} else { /* single transfer operation */
+@@ -704,7 +698,6 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 			next_queue_vb = list_entry(pcdev->capture.next,
+ 				 struct videobuf_buffer, queue);
+ 			list_del_init(&next_queue_vb->queue);
+-			pcdev->queue_cnt--;
+ 			pcdev->queue_buf[SINGLE_BUF] = next_queue_vb;
+ 			pcdev->queue_buf[SINGLE_BUF]->state = VIDEOBUF_ACTIVE;
+ 			phys_addr_top =
+@@ -2055,7 +2048,6 @@ static int __devinit rcar_vin_probe(struct platform_device *pdev)
+ 	pcdev->video_limit = 0; /* only enabled if second resource exists */
+ 	pcdev->mb_cnt = 0;
+ 	pcdev->capture_status = STOPPED;
+-	pcdev->queue_cnt = 0;
+ 	pcdev->set_pos = 0;
+ 	pcdev->get_pos = 0;
+ 	init_completion(&pcdev->capture_stop);
+-- 
+1.7.0.4
+

@@ -1,0 +1,40 @@
+From 933ea8fde8a32840fb54a8eb6fb436b4dd295cac Mon Sep 17 00:00:00 2001
+From: Takanari Hayama <taki@igel.co.jp>
+Date: Thu, 2 Feb 2012 14:31:09 +0900
+Subject: [PATCH 17/73] rcarfb: make WVGA to be default resolution.
+
+We shall limit the size of framebuffer in order to allocate
+4MB for rcarvin.
+
+XXX: we must reduce the amount of memory allocated for rcarvin.
+---
+ include/video/rcarfb.h |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/video/rcarfb.h b/include/video/rcarfb.h
+index 8b3a5fd..a3e4e29 100644
+--- a/include/video/rcarfb.h
++++ b/include/video/rcarfb.h
+@@ -68,7 +68,7 @@ struct rcar_reso_info {
+ #define	MODE_WXGA	5	/* 1280x768 */
+ #define	MODE_WXGA2	6	/* 1280x720 */
+ #define MODE_ERROR	-1	/* error size */
+-#define DEFAULT_MODE	MODE_XGA
++#define DEFAULT_MODE	MODE_WVGA
+ 
+ #define XRES_VGA	640
+ #define XRES_SVGA	800
+@@ -80,8 +80,8 @@ struct rcar_reso_info {
+ #define YRES_XGA	768
+ #define YRES_WXGA	800
+ 
+-#define MAX_XRES	XRES_SXGA
+-#define MAX_YRES	YRES_XGA
++#define MAX_XRES	XRES_SVGA
++#define MAX_YRES	YRES_VGA
+ 
+ #define FB_BYTES	4
+ 
+-- 
+1.7.0.4
+

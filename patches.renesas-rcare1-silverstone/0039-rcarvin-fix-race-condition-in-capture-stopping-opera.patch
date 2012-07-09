@@ -1,0 +1,86 @@
+From 4b73c005d76ee3e17e4f06ccea4824d5acf81945 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Mon, 28 May 2012 19:16:47 +0900
+Subject: [PATCH 39/73] rcarvin: fix race condition in capture stopping operation
+
+There could exist a race condition if a pending interrupt had been
+produced during executing rcar_vin_videobuf_release().
+An error flag written by rcar_vin_videobuf_release() may be
+overwritten afterward by an irq handler which has been invoked
+by a pending interrupt.
+This introduces a flag 'request_to_stop' which means a user request
+for stopping capturing.
+The flag could be used to distinguish reasons for stopping capturing,
+between a user request and exhausting all buffers.
+---
+ drivers/media/video/rcarvin.c |   12 +++++++-----
+ 1 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index edad0d2..1e39d83 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -169,7 +169,7 @@ struct rcar_vin_dev {
+ 	unsigned int set_pos;
+ 	unsigned int get_pos;
+ 	enum rcar_vin_capture_status capture_status;
+-	unsigned int wait_for_completion;
++	unsigned int request_to_stop;
+ 	struct completion capture_stop;
+ };
+ 
+@@ -562,6 +562,8 @@ static void rcar_vin_videobuf_queue(struct videobuf_queue *vq,
+ 
+ 	if ((pcdev->capture_status != RUNNING) &&
+ 	    (pcdev->mb_cnt >= n_slots)) {
++		pcdev->request_to_stop = 0;
++		init_completion(&pcdev->capture_stop);
+ 		pcdev->capture_status = RUNNING;
+ 		rcar_vin_capture(pcdev);
+ 	}
+@@ -579,6 +581,8 @@ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+ 
+ 	if (vb->state == VIDEOBUF_ACTIVE) {
+ 		while (pcdev->capture_status != STOPPED) {
++			pcdev->request_to_stop = 1;
++
+ 			/* issue stop if running */
+ 			if (pcdev->capture_status == RUNNING) {
+ 				pcdev->capture_status = STOPPING;
+@@ -587,7 +591,6 @@ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+ 
+ 			/* wait until capturing has been stopped */
+ 			if (pcdev->capture_status == STOPPING) {
+-				pcdev->wait_for_completion = 1;
+ 				spin_unlock_irqrestore(&pcdev->lock, flags);
+ 				wait_for_completion(&pcdev->capture_stop);
+ 				spin_lock_irqsave(&pcdev->lock, flags);
+@@ -639,7 +642,7 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 
+ 	stopped = ((vin_read(pcdev, V0MS) & VIN_VNMS_CA) == 0);
+ 
+-	if (pcdev->wait_for_completion == 0) {
++	if (pcdev->request_to_stop == 0) {
+ 		if (is_continuous_transfer(pcdev)) {
+ 			ms_fbs = (vin_get_status(pcdev) & MB_MASK) >> 3;
+ 			n_slots = MB_NUM;
+@@ -697,7 +700,7 @@ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ 		}
+ 	} else if (stopped) {
+ 		pcdev->capture_status = STOPPED;
+-		pcdev->wait_for_completion = 0;
++		pcdev->request_to_stop = 0;
+ 		complete(&pcdev->capture_stop);
+ 	}
+ 
+@@ -2042,7 +2045,6 @@ static int __devinit rcar_vin_probe(struct platform_device *pdev)
+ 	pcdev->capture_status = STOPPED;
+ 	pcdev->set_pos = 0;
+ 	pcdev->get_pos = 0;
+-	init_completion(&pcdev->capture_stop);
+ 	for (i = 0; i < MB_NUM; i++)
+ 		pcdev->queue_buf[i] = NULL;
+ 
+-- 
+1.7.0.4
+

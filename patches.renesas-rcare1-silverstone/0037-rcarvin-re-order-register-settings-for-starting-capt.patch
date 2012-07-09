@@ -1,0 +1,35 @@
+From d6d97db159495788f50b4ce739abeff525414c0b Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 23 May 2012 16:36:53 +0900
+Subject: [PATCH 37/73] rcarvin: re-order register settings for starting capture
+
+This changes order between enabling interrupt and starting capture
+to prevent race condition.
+---
+ drivers/media/video/rcarvin.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index cf8f313..384974f 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -441,13 +441,13 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		vin_write(pcdev, V0FC, VIN_VNFC_S_FRAME);
+ 	}
+ 
++	/* enable interrupt */
++	vin_write(pcdev, V0IE, VIN_VNIE_MASK);
++
+ 	/* start capturing */
+ 	vin_write(pcdev, V0DMR, dmr);
+ 	vin_write(pcdev, V0MC, mc | VIN_VNMC_ME);
+ 
+-	/* enable interrupt */
+-	vin_write(pcdev, V0IE, VIN_VNIE_MASK);
+-
+ 	return ret;
+ }
+ 
+-- 
+1.7.0.4
+

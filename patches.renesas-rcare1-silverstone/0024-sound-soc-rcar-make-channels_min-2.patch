@@ -1,0 +1,25 @@
+From 18f2435cfc42fbd738cf38330211b2a1a387e875 Mon Sep 17 00:00:00 2001
+From: Hideki EIRAKU <hdk@igel.co.jp>
+Date: Fri, 6 Apr 2012 18:06:20 +0900
+Subject: [PATCH 24/73] sound: soc: rcar: make channels_min 2
+
+---
+ sound/soc/rcar/sss_pcm.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/rcar/sss_pcm.c b/sound/soc/rcar/sss_pcm.c
+index c9b2028..d27d0c5 100644
+--- a/sound/soc/rcar/sss_pcm.c
++++ b/sound/soc/rcar/sss_pcm.c
+@@ -1217,7 +1217,7 @@ struct snd_soc_dai sss_soc_dai[] = {
+ 		.playback = {
+ 			.rates		= SNDRV_PCM_RATE_8000_48000,
+ 			.formats	= SNDRV_PCM_FMTBIT_S16_LE,
+-			.channels_min	= 1,
++			.channels_min	= 2,
+ 			.channels_max	= 2,
+ 		},
+ 		.ops = &sss_dai_ops,
+-- 
+1.7.0.4
+

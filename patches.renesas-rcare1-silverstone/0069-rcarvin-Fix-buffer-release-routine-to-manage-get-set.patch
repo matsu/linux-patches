@@ -1,0 +1,44 @@
+From e262d238604996003a2ca997d998725d3b6ffbe4 Mon Sep 17 00:00:00 2001
+From: mukawa <mukawa@igel.co.jp>
+Date: Fri, 8 Jun 2012 11:47:07 +0900
+Subject: [PATCH 69/73] rcarvin: Fix buffer release routine to manage get/set_pos correctly
+
+---
+ drivers/media/video/rcarvin.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 72dbaff..99732f6 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -641,6 +641,7 @@ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+ 	struct soc_camera_host *ici = to_soc_camera_host(icd->dev.parent);
+ 	struct rcar_vin_dev *pcdev = ici->priv;
+ 	unsigned long flags, i;
++	int n_slots;
+ 
+ 	spin_lock_irqsave(&pcdev->lock, flags);
+ 
+@@ -663,11 +664,17 @@ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+ 		}
+ 
+ 		vb->state = VIDEOBUF_ERROR;
++		if (is_continuous_transfer(pcdev))
++			n_slots = MB_NUM;
++		else
++			n_slots = 1;
++
+ 		for (i = 0; i < MB_NUM; i++) {
+ 			if (pcdev->queue_buf[i] == vb) {
+ 				pcdev->mb_cnt--;
+-				/* increment get_pos  */
+-				pcdev->get_pos = (pcdev->get_pos + 1) % MB_NUM;
++				/* decrement set_pos  */
++				pcdev->set_pos = (pcdev->set_pos +
++						(n_slots - 1)) % n_slots;
+ 				pcdev->queue_buf[i] = NULL;
+ 				break;
+ 			}
+-- 
+1.7.0.4
+

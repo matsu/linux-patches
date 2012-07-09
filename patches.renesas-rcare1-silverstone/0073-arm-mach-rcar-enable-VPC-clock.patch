@@ -1,0 +1,28 @@
+From e33739b1d43fffa9d449b33d25752f502d061083 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Tue, 3 Jul 2012 15:36:27 +0900
+Subject: [PATCH 73/73] arm: mach-rcar: enable VPC clock
+
+---
+ arch/arm/mach-rcar/clock.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/clock.c b/arch/arm/mach-rcar/clock.c
+index 0ae6aab..657b70b 100644
+--- a/arch/arm/mach-rcar/clock.c
++++ b/arch/arm/mach-rcar/clock.c
+@@ -43,6 +43,11 @@ static void vpu5hd2_clock_init( void )
+     __mstpcr4 &= ~(1 << 10);
+     writel( __mstpcr4, IO_ADDRESS(RC_BASE_CPG + 0x50) );
+ 
++    printk( "UIO: Supply clock for VPC\n" );
++    __mstpcr5 = readl( IO_ADDRESS(RC_BASE_CPG + 0x50) );
++    __mstpcr5 &= ~(1 << 8);
++    writel( __mstpcr5, IO_ADDRESS(RC_BASE_CPG + 0x50) );
++
+     printk( "UIO: Supply clock for VIO6C\n" );
+     __mstpcr5 = readl( IO_ADDRESS(RC_BASE_CPG + 0x54) );
+     __mstpcr5 &= ~(1 << 17);
+-- 
+1.7.0.4
+

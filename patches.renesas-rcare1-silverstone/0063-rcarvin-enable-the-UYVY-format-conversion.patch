@@ -1,0 +1,33 @@
+From aa2d8a8b5c326aa6c9d1bb554c623d9d6a392655 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 20 Jun 2012 11:49:47 +0900
+Subject: [PATCH 63/73] rcarvin: enable the UYVY format conversion
+
+This enables the UYVY format conversion by VIN.
+NOTE: ioctl(VIDIOC_ENUM_FMT) may output duplicated UYVY entries if
+sensor would output UYVY format data. It should be fixed later.
+---
+ drivers/media/video/rcarvin.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 2408cd6..4187969 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -1067,6 +1067,13 @@ static const struct soc_mbus_pixelfmt rcar_vin_formats[] = {
+ 		.order			= SOC_MBUS_ORDER_LE,
+ 	},
+ 	{
++		.fourcc			= V4L2_PIX_FMT_UYVY,
++		.name			= "UYVY",
++		.bits_per_sample	= 16,
++		.packing		= SOC_MBUS_PACKING_NONE,
++		.order			= SOC_MBUS_ORDER_LE,
++	},
++	{
+ 		.fourcc			= V4L2_PIX_FMT_RGB565,
+ 		.name			= "RGB565",
+ 		.bits_per_sample	= 16,
+-- 
+1.7.0.4
+

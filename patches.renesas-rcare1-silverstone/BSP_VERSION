@@ -1,0 +1,7 @@
+VERSION: ??? (before v023)
+HEAD: 
+commit bd98ea74c38c5e799642172802c826e2a929ac59
+Author: Kouei Abe <kouei.abe.cp@rms.renesas.com>
+Date:   Tue Aug 30 15:35:16 2011 +0900
+
+    sound: soc: rcar: Fix inverted stereo

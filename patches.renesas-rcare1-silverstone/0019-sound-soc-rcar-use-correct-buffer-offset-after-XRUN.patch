@@ -1,0 +1,40 @@
+From cc6e9e2c75b3283caf3b149a47b56ad1001bd7b6 Mon Sep 17 00:00:00 2001
+From: Hideki EIRAKU <hdk@igel.co.jp>
+Date: Fri, 6 Apr 2012 18:09:22 +0900
+Subject: [PATCH 19/73] sound: soc: rcar: use correct buffer offset after XRUN
+
+---
+ sound/soc/rcar/sss_pcm.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/rcar/sss_pcm.c b/sound/soc/rcar/sss_pcm.c
+index 29dfe75..a34b305 100644
+--- a/sound/soc/rcar/sss_pcm.c
++++ b/sound/soc/rcar/sss_pcm.c
+@@ -1157,6 +1157,15 @@ static snd_pcm_uframes_t sss_pointer(struct snd_pcm_substream *substream)
+ 	return position;
+ }
+ 
++static int sss_pcm_prepare(struct snd_pcm_substream *substream)
++{
++	struct rcar_pcm_info *pcminfo = substream->runtime->private_data;
++
++	pcminfo->period = 0;
++	pcminfo->tran_period = 0;
++	return 0;
++}
++
+ static struct snd_pcm_ops sss_pcm_ops = {
+ 	.open		= sss_pcm_open,
+ 	.close		= sss_pcm_close,
+@@ -1164,6 +1173,7 @@ static struct snd_pcm_ops sss_pcm_ops = {
+ 	.hw_params	= sss_hw_params,
+ 	.hw_free	= sss_hw_free,
+ 	.pointer	= sss_pointer,
++	.prepare	= sss_pcm_prepare,
+ };
+ 
+ /************************************************************************
+-- 
+1.7.0.4
+

@@ -1,0 +1,48 @@
+From 0c929cf588e71dd00640489b1fe572de44d34a2b Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 31 May 2012 11:26:55 +0900
+Subject: [PATCH 42/73] mediabus: add a new data packing type 'EXTEND32' on the media-bus
+
+A new data packing type 'SOC_MBUS_PACKING_EXTEND32' means that
+sample width (e.g., 24 bits) has to be extended to 32 bits.
+---
+ drivers/media/video/soc_mediabus.c |    2 ++
+ include/media/soc_mediabus.h       |    3 +++
+ 2 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/soc_mediabus.c b/drivers/media/video/soc_mediabus.c
+index 8b63b65..9d14948 100644
+--- a/drivers/media/video/soc_mediabus.c
++++ b/drivers/media/video/soc_mediabus.c
+@@ -141,6 +141,8 @@ s32 soc_mbus_bytes_per_line(u32 width, const struct soc_mbus_pixelfmt *mf)
+ 	case SOC_MBUS_PACKING_2X8_PADLO:
+ 	case SOC_MBUS_PACKING_EXTEND16:
+ 		return width * 2;
++	case SOC_MBUS_PACKING_EXTEND32:
++		return width * 4;
+ 	}
+ 	return -EINVAL;
+ }
+diff --git a/include/media/soc_mediabus.h b/include/media/soc_mediabus.h
+index 037cd7b..25e7b6d 100644
+--- a/include/media/soc_mediabus.h
++++ b/include/media/soc_mediabus.h
+@@ -23,12 +23,15 @@
+  * @SOC_MBUS_PACKING_2X8_PADLO:	as above, but low bits are padding
+  * @SOC_MBUS_PACKING_EXTEND16:	sample width (e.g., 10 bits) has to be extended
+  *				to 16 bits
++ * @SOC_MBUS_PACKING_EXTEND32:  sample width (e.g., 24 bits) has to be extended
++ *				to 32 bits
+  */
+ enum soc_mbus_packing {
+ 	SOC_MBUS_PACKING_NONE,
+ 	SOC_MBUS_PACKING_2X8_PADHI,
+ 	SOC_MBUS_PACKING_2X8_PADLO,
+ 	SOC_MBUS_PACKING_EXTEND16,
++	SOC_MBUS_PACKING_EXTEND32,
+ };
+ 
+ /**
+-- 
+1.7.0.4
+

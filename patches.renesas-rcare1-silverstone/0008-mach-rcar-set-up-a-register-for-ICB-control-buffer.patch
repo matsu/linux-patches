@@ -1,0 +1,26 @@
+From 8004dc59efe8b3803959c20aa5b6d32201459c3e Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Mon, 6 Feb 2012 13:39:35 +0900
+Subject: [PATCH 08/73] mach-rcar: set up a register for ICB control buffer
+
+The default value of this register may be inappropriate.
+---
+ arch/arm/mach-rcar/board-silverstone.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index f56dfdc..bbab5ee 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -742,6 +742,8 @@ static void __init silverstone_init(void)
+ 	writel((~0x40 & readl(IO_ADDRESS(SILVERSTONE_BASE_FPGA+0x80C))),
+ 			IO_ADDRESS(SILVERSTONE_BASE_FPGA+0x80C));
+ 
++	/* ICB buffer control */
++	writel(0x0018001cUL, IO_ADDRESS(0xfd050098UL));
+ }
+ 
+ MACHINE_START(SILVERSTONE, "SILVERSTONE")
+-- 
+1.7.0.4
+

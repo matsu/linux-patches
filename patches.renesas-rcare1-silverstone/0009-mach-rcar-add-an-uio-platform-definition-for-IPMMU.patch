@@ -1,0 +1,57 @@
+From a0f1ec5e77d46b1eabcdb47e9af23abdcddbbc23 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Mon, 6 Feb 2012 15:26:56 +0900
+Subject: [PATCH 09/73] mach-rcar: add an uio platform definition for IPMMU
+
+---
+ arch/arm/mach-rcar/board-silverstone.c |   27 +++++++++++++++++++++++++++
+ 1 files changed, 27 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index bbab5ee..29371a2 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -139,6 +139,32 @@ static struct platform_device vio_device = {
+ 	.num_resources  = ARRAY_SIZE(vio_resources),
+ };
+ 
++/* IPMMU */
++static struct uio_info ipmmu_platform_data = {
++	.name = "IPMMU",
++	.version = "0",
++	.irq = -1,
++};
++
++static struct resource ipmmu_resources[] = {
++	[0] = {
++		.name   = "IPMMU",
++		.start  = 0xfd051000,
++		.end    = 0xfd0510ff,
++		.flags  = IORESOURCE_MEM,
++	},
++};
++
++static struct platform_device ipmmu_device = {
++	.name           = "uio_pdrv_genirq",
++	.id             = 3,
++	.dev = {
++		.platform_data  = &ipmmu_platform_data,
++	},
++	.resource       = ipmmu_resources,
++	.num_resources  = ARRAY_SIZE(ipmmu_resources),
++};
++
+ static void __init memchunk_cmdline_override( char *name, unsigned long *sizep )
+ {
+     char *p = boot_command_line;
+@@ -686,6 +712,7 @@ static struct platform_device *devs[] __initdata = {
+ 	&vpu_device,
+ 	&meram_device,
+ 	&vio_device,
++	&ipmmu_device,
+ };
+ 
+ static void __init gic_init_irq(void)
+-- 
+1.7.0.4
+
