@@ -1,0 +1,70 @@
+From 81c4a4e144661892d31e994adb2f4cd8aed17808 Mon Sep 17 00:00:00 2001
+From: mukawa <mukawa@igel.co.jp>
+Date: Thu, 2 Aug 2012 15:14:17 +0900
+Subject: [PATCH 76/76] rcarvin: Adjust field/frame complete interrupt settings in progressive mode.
+
+When progressive and continuous capturing mode is specified,the VIN
+will capture an entire frame within each of the odd/even fields that
+it returns.
+Since the driver interprets every interrupt from the VIN as a
+"frame complete" signal, the VIN should send an interrupt to the
+driver for each field captured since in this case each "field" is
+actually a frame.
+---
+ drivers/media/video/rcarvin.c |   11 ++++++-----
+ 1 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 3cec1f4..0362cf4 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -328,7 +328,6 @@ static void free_buffer(struct videobuf_queue *vq,
+ #define VIN_VNIE_EFE   (1 << 1)  /* End of Frame interrupt Enable */
+ #define VIN_VNIE_FOE   (1 << 0)  /* Fifo Over flow interrupt Enable */
+ 
+-#define VIN_VNIE_MASK        (VIN_VNIE_EFE)
+ #define VIN_VNIE_ERROR_MASK  (VIN_VNIE_CEE | VIN_VNIE_FOE)
+ 
+ /* VnMC */
+@@ -395,7 +394,7 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 	struct soc_camera_device *icd = pcdev->icd;
+ 	struct rcar_vin_cam *cam = icd->host_priv;
+ 	u32 status_of_int;
+-	u32 mc, dmr;
++	u32 mc, dmr, ie;
+ 	int ret = 0;
+ 
+ 	status_of_int = vin_read(pcdev, V0INTS);
+@@ -421,6 +420,7 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 	/* set priority for memory transfer */
+ 	vin_write(pcdev, V0MTC, 0x0a090008);
+ 
++	ie = VIN_VNIE_EFE;
+ 	switch (pcdev->field) {
+ 	case V4L2_FIELD_TOP:
+ 		mc = VIN_VNMC_IM_ODD;
+@@ -436,9 +436,10 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		mc = VIN_VNMC_IM_FULL | VIN_VNMC_FOC;
+ 		break;
+ 	default:
+-		if (is_continuous_transfer(pcdev))
++		if (is_continuous_transfer(pcdev)) {
+ 			mc = VIN_VNMC_IM_ODD_EVEN;
+-		else
++			ie = VIN_VNIE_FIE;
++		} else
+ 			mc = VIN_VNMC_IM_ODD;
+ 		break;
+ 	}
+@@ -504,7 +505,7 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 	}
+ 
+ 	/* enable interrupt */
+-	vin_write(pcdev, V0IE, VIN_VNIE_MASK);
++	vin_write(pcdev, V0IE, ie);
+ 
+ 	/* start capturing */
+ 	vin_write(pcdev, V0DMR, dmr);
+-- 
+1.7.0.4
+
