@@ -1,0 +1,30 @@
+From e2a17ae16463f1364a1e6c06f548d96ad85c1fbb Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Mon, 6 Feb 2012 13:17:11 +0900
+Subject: [PATCH 04/80] mach-rcar: fix meram size to access through UIO
+
+In R-CarE1, just 128 KiB MERAM could be mounted, furthermore
+the last 32KiB region must be reserved in the default H/W configuration.
+This patch fixes the range of MERAM to access through UIO.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ arch/arm/mach-rcar/board-silverstone.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index 619ec02..a9536d9 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -96,7 +96,7 @@ static struct resource meram_resources[] = {
+ 	[1] = {
+ 		.name   = "MERAM_MEM",
+ 		.start  = 0xfd480000,
+-		.end    = 0xfd4fffff,
++		.end    = 0xfd480000 + ((128 - 32) << 10) - 1,	/* 32KiB reserved for cache */
+ 		.flags  = IORESOURCE_MEM,
+ 	}
+ };
+-- 
+1.7.0.4
+
