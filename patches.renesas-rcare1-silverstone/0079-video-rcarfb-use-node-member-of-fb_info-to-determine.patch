@@ -1,0 +1,74 @@
+From 2a0f525c13fb910058ca7cf2a43ed493fedd6fed Mon Sep 17 00:00:00 2001
+From: Damian Hobson-Garcia <dhobsong@igel.co.jp>
+Date: Tue, 14 Aug 2012 19:22:26 +0900
+Subject: [PATCH 79/80] video: rcarfb: use node member of fb_info to determine fb
+
+The current fb being accessed is already stored in the fb_info structure.
+There is no need to hack it into the fb_fix_screeninfo.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/video/rcarfb.c |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 605fd04..98e1ae3 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -729,7 +729,7 @@ static int rcar_du_pan_display(struct fb_var_screeninfo *var,
+ {
+ 	struct rcar_du_priv *priv = info->par;
+ 
+-	int fb_num = (info->fix.id[15] - '0');
++	int fb_num = info->node;
+ 	int index1 = priv->dispdev->fb_desc[fb_num].index1;
+ 
+ 	unsigned long tmp;
+@@ -764,7 +764,7 @@ static int rcar_du_check_var(struct fb_var_screeninfo *var,
+ {
+ 	struct rcar_du_priv *priv = info->par;
+ 
+-	int fb_num = (info->fix.id[15] - '0');
++	int fb_num = info->node;
+ 
+ 	switch (var->bits_per_pixel) {
+ 	case BITPARPIXEL_16:	/* RGB 565 */
+@@ -800,7 +800,7 @@ static int rcar_du_check_var(struct fb_var_screeninfo *var,
+ 
+ static int rcar_du_set_par(struct fb_info *info)
+ {
+-	int fb_num = (info->fix.id[15] - '0');
++	int fb_num = info->node;
+ 
+ 	struct rcar_du_priv *priv = info->par;
+ 	CarE1PlaneConfig *planeconfig = &priv->planeconfig[fb_num];
+@@ -809,7 +809,7 @@ static int rcar_du_set_par(struct fb_info *info)
+ 	int cur_mode, new_mode, ret = 0;
+ 
+ 	/* We use first plane for display timings (TODO: allow independent configuration?) */
+-	if (info->fix.id[15] == '0') {
++	if (info->node == 0) {
+ 		/* check the resolution */
+ 		new_mode = du_check_disp_mode(var->xres, var->yres);
+ 		if (new_mode == MODE_ERROR)
+@@ -873,7 +873,7 @@ err1:
+ 
+ static int rcar_ioctl (struct fb_info *info, unsigned int cmd, unsigned long arg)
+ {
+-	int fb_num = (info->fix.id[15] - '0');
++	int fb_num = info->node;
+ 	struct rcar_du_priv *priv = info->par;
+ 	CarE1PlaneConfig config;
+ 
+@@ -1052,7 +1052,7 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 
+ 		info->fix = rcar_du_fix;
+ 
+-		/* Write plane index into id string (TODO: maybe find better way to distinguish later on) */
++		/* Write plane index into id string */
+ 		info->fix.id[15] = '0' + i;
+ 
+ 		error = rcar_du_check_var(&info->var, info);
+-- 
+1.7.0.4
+
