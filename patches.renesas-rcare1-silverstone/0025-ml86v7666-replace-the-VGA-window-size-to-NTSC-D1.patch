@@ -1,0 +1,103 @@
+From c4e9d91b6c758187db6d1aadf871d650fde6b13d Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 31 May 2012 10:49:11 +0900
+Subject: [PATCH 25/80] ml86v7666: replace the VGA window size to NTSC(D1)
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/ml86v7666.c |   40 +++++++++++++++++++-------------------
+ 1 files changed, 20 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/media/video/ml86v7666.c b/drivers/media/video/ml86v7666.c
+index e16e654..d0bd895 100644
+--- a/drivers/media/video/ml86v7666.c
++++ b/drivers/media/video/ml86v7666.c
+@@ -231,7 +231,7 @@ static const struct regval_list ml86v7666_qvga_regs[] = {
+ 	ENDMARKER,
+ };
+ 
+-static const struct regval_list ml86v7666_vga_regs[] = {
++static const struct regval_list ml86v7666_ntsc_regs[] = {
+ 	ENDMARKER,
+ };
+ 
+@@ -256,18 +256,18 @@ static const struct ml86v7666_color_format ml86v7666_cfmts[] = {
+ /*
+  * window size list
+  */
+-#define VGA_WIDTH   640
+-#define VGA_HEIGHT  480
++#define NTSC_WIDTH   720
++#define NTSC_HEIGHT  486
+ #define QVGA_WIDTH  320
+ #define QVGA_HEIGHT 240
+-#define MAX_WIDTH   VGA_WIDTH
+-#define MAX_HEIGHT  VGA_HEIGHT
+-
+-static const struct ml86v7666_win_size ml86v7666_win_vga = {
+-	.name     = "VGA",
+-	.width    = VGA_WIDTH,
+-	.height   = VGA_HEIGHT,
+-	.regs     = ml86v7666_vga_regs,
++#define MAX_WIDTH   NTSC_WIDTH
++#define MAX_HEIGHT  NTSC_HEIGHT
++
++static const struct ml86v7666_win_size ml86v7666_win_ntsc = {
++	.name     = "NTSC",
++	.width    = NTSC_WIDTH,
++	.height   = NTSC_HEIGHT,
++	.regs     = ml86v7666_ntsc_regs,
+ };
+ 
+ static const struct ml86v7666_win_size ml86v7666_win_qvga = {
+@@ -625,11 +625,11 @@ static const struct ml86v7666_win_size *ml86v7666_select_win(u32 width,
+ 		abs(height - ml86v7666_win_qvga.height);
+ 	win = &ml86v7666_win_qvga;
+ 
+-	/* VGA */
++	/* NTSC */
+ 	if (diff >
+-	    abs(width  - ml86v7666_win_vga.width) +
+-	    abs(height - ml86v7666_win_vga.height))
+-		win = &ml86v7666_win_vga;
++	    abs(width  - ml86v7666_win_ntsc.width) +
++	    abs(height - ml86v7666_win_ntsc.height))
++		win = &ml86v7666_win_ntsc;
+ 
+ 	return win;
+ }
+@@ -753,8 +753,8 @@ static int ml86v7666_g_crop(struct v4l2_subdev *sd, struct v4l2_crop *a)
+ {
+ 	a->c.left	= 0;
+ 	a->c.top	= 0;
+-	a->c.width	= VGA_WIDTH;
+-	a->c.height	= VGA_HEIGHT;
++	a->c.width	= NTSC_WIDTH;
++	a->c.height	= NTSC_HEIGHT;
+ 	a->type		= V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 
+ 	return 0;
+@@ -764,8 +764,8 @@ static int ml86v7666_cropcap(struct v4l2_subdev *sd, struct v4l2_cropcap *a)
+ {
+ 	a->bounds.left			= 0;
+ 	a->bounds.top			= 0;
+-	a->bounds.width			= VGA_WIDTH;
+-	a->bounds.height		= VGA_HEIGHT;
++	a->bounds.width			= NTSC_WIDTH;
++	a->bounds.height		= NTSC_HEIGHT;
+ 	a->defrect			= a->bounds;
+ 	a->type				= V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 	a->pixelaspect.numerator	= 1;
+@@ -781,7 +781,7 @@ static int ml86v7666_g_fmt(struct v4l2_subdev *sd,
+ 	struct ml86v7666_priv *priv = to_ml86v7666(client);
+ 
+ 	if (!priv->win || !priv->cfmt) {
+-		u32 width = VGA_WIDTH, height = VGA_HEIGHT;
++		u32 width = NTSC_WIDTH, height = NTSC_HEIGHT;
+ 		int ret = ml86v7666_set_params(client, &width, &height,
+ 					    V4L2_MBUS_FMT_YUYV8_2X8_LE);
+ 		if (ret < 0)
+-- 
+1.7.0.4
+
