@@ -1,0 +1,53 @@
+From 8305a3ecd71f4a9bfe39e01845317f2ab858aa4a Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 15 Aug 2012 15:03:55 +0900
+Subject: [PATCH 80/80] video: rcarfb: revise the id string in the fb_fix_screeninfo structure
+
+The current implementation of the id string in the fb_fix_screeninfo
+structure has two issues.
+The first issue is memory leak. The string may be 17 bytes since
+it consists of a 15-byte constant string, an index character, and
+a NULL termination.
+The second issue is index mismatch between plane and framebuffer.
+It means that one 32-bit depth framebuffer may be realized with
+two planes.
+This change makes the id string fit into the 16-bytes array
+and present index(s) of used plane rather than framebuffer index.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/video/rcarfb.c |   11 ++++++++---
+ 1 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 98e1ae3..b5fc5f1 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -100,7 +100,6 @@ struct rcar_du_priv {
+ };
+ 
+ static struct fb_fix_screeninfo rcar_du_fix  = {
+-	.id =		"R-Car DU plane ",
+ 	.type =		FB_TYPE_PACKED_PIXELS,
+ 	.visual =	FB_VISUAL_TRUECOLOR,
+ 	.accel =	FB_ACCEL_NONE,
+@@ -1052,8 +1051,14 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 
+ 		info->fix = rcar_du_fix;
+ 
+-		/* Write plane index into id string */
+-		info->fix.id[15] = '0' + i;
++		/* Write id string */
++		if (priv->dispdev->fb_desc[i].index1 == priv->dispdev->fb_desc[i].index2)
++			snprintf(info->fix.id, sizeof(info->fix.id), "R-Car DU %d",
++				 priv->dispdev->fb_desc[i].index1);
++		else
++			snprintf(info->fix.id, sizeof(info->fix.id), "R-Car DU %d,%d",
++				 priv->dispdev->fb_desc[i].index1,
++				 priv->dispdev->fb_desc[i].index2);
+ 
+ 		error = rcar_du_check_var(&info->var, info);
+ 		if (error)
+-- 
+1.7.0.4
+
