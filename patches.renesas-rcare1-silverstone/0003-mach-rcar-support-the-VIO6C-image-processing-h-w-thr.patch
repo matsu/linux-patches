@@ -1,0 +1,152 @@
+From 214a3a1bbcd52823995b725d2386f8e13cb0ac07 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Tue, 17 Jan 2012 14:36:46 +0900
+Subject: [PATCH 03/80] mach-rcar: support the VIO6C image processing h/w through UIO
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ arch/arm/mach-rcar/board-silverstone.c |   31 +++++++++++++++++++++++++++++++
+ arch/arm/mach-rcar/include/mach/irqs.h |    4 +++-
+ arch/arm/mach-rcar/intc.c              |   25 +++++++++++++++++++++----
+ 3 files changed, 55 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index 1356b19..619ec02 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -111,6 +111,34 @@ static struct platform_device meram_device = {
+ 	.num_resources  = ARRAY_SIZE(meram_resources),
+ };
+ 
++/* VIO6C2 */
++static struct uio_info vio_platform_data = {
++	.name = "VIO6C",
++	.version = "0",
++	.irq = IRQ_VIO6C,
++};
++
++static struct resource vio_resources[] = {
++	[0] = {
++		.name   = "VIO6C",
++		.start  = 0xfd020000,
++		.end    = 0xfd022a33,
++		.flags  = IORESOURCE_MEM,
++	},
++	[1] = {
++	}
++};
++
++static struct platform_device vio_device = {
++	.name           = "uio_pdrv_genirq",
++	.id             = 2,
++	.dev = {
++		.platform_data  = &vio_platform_data,
++	},
++	.resource       = vio_resources,
++	.num_resources  = ARRAY_SIZE(vio_resources),
++};
++
+ static void __init memchunk_cmdline_override( char *name, unsigned long *sizep )
+ {
+     char *p = boot_command_line;
+@@ -678,6 +706,7 @@ static struct platform_device *devs[] __initdata = {
+ 	&rcar_camera[0],
+ 	&vpu_device,
+ 	&meram_device,
++	&vio_device,
+ 	&rcar_pmu_device,
+ };
+ 
+@@ -704,6 +733,8 @@ static void __init silverstone_init(void)
+ {
+ 	/* allocate memory for VPU5HD */
+ 	platform_resource_setup_memory( &vpu_device, "vpu", 64 << 20 );
++	/* allocate memory for VIO6C */
++	platform_resource_setup_memory( &vio_device, "vio", 8 << 20 );
+ 
+ 	platform_add_devices(devs, ARRAY_SIZE(devs));
+ 	rcar_gpio_init();
+diff --git a/arch/arm/mach-rcar/include/mach/irqs.h b/arch/arm/mach-rcar/include/mach/irqs.h
+index f485168..c4384a6 100644
+--- a/arch/arm/mach-rcar/include/mach/irqs.h
++++ b/arch/arm/mach-rcar/include/mach/irqs.h
+@@ -39,6 +39,7 @@
+ #define	IRQ_DMAC_H20_27	INT_DMAC_H20_27
+ #define	IRQ_DMAC_H28_38	INT_DMAC_H28_38
+ #define	IRQ_VPU5HD2	INT_VPU5HD2
++#define	IRQ_VIO		INT_VIO6C
+ #define	IRQ_GIO		INT_GIO
+ 
+ /* irq for intc2 */
+@@ -47,7 +48,8 @@
+ #define	IRQ_USBH_EHCI	(INTC2_IRQ_BASE + 1)
+ #define	IRQ_DMAC_H(n)	(INTC2_IRQ_BASE + 2 + (n))	/* hpb-dmac 0-38 */
+ #define	IRQ_GPIO(n)	(INTC2_IRQ_BASE + 41 + (n))	/* gpio 0-4 */
+-#define	IRQ_VPU5HD2_H (INTC2_IRQ_BASE + 46 )
++#define	IRQ_VPU5HD2_H	(INTC2_IRQ_BASE + 46)
++#define	IRQ_VIO6C	(INTC2_IRQ_BASE + 47)
+ 
+ /* irq for gpio port */
+ #define	GPIO_IRQ_BASE	256
+diff --git a/arch/arm/mach-rcar/intc.c b/arch/arm/mach-rcar/intc.c
+index 3df5289..8605ec6 100644
+--- a/arch/arm/mach-rcar/intc.c
++++ b/arch/arm/mach-rcar/intc.c
+@@ -92,6 +92,11 @@ static struct intc2_child dmach28_38_child[] = {
+ static struct intc2_child vpu5hd2_child[] = {
+ 	{ (1<<4), IRQ_VPU5HD2_H },
+ };
++
++static struct intc2_child vio6c_child[] = {
++	{ (1<<8), IRQ_VIO6C },
++};
++
+ static struct intc2_child gpio_child[] = {
+ 	{ (0xf<<0), IRQ_GPIO(0) },
+ 	{ (0xf<<4), IRQ_GPIO(1) },
+@@ -144,6 +149,12 @@ static struct intc2_parent intc2_parent_desc[] = {
+ 		vpu5hd2_child
+ 	},
+ 	{
++		IRQ_VIO,
++		IO_ADDRESS(RC_BASE_INTC2 + 0x100),
++		ARRAY_SIZE(vio6c_child),
++		vio6c_child
++	},
++	{
+ 		IRQ_GIO,
+ 		IO_ADDRESS(RC_BASE_INTC2 + 0x108),
+ 		ARRAY_SIZE(gpio_child),
+@@ -184,9 +195,12 @@ static void intc2_irq_mask(unsigned int irq)
+ static void intc2_irq_unmask(unsigned int irq)
+ {
+     unsigned long val;
+-    if ( irq == IRQ_VPU5HD2_H ){
+-        val = 1 << 4;
+-        writel( val, IO_ADDRESS( INTC2_BASE + INT2SMSKCR1 ));
++    if ( irq == IRQ_VPU5HD2_H ) {
++	    val = 1 << 4;
++	    writel( val, IO_ADDRESS( INTC2_BASE + INT2SMSKCR1 ));
++    } else if (irq == IRQ_VIO6C) {
++	    val = 1 << 8;
++	    writel(val, IO_ADDRESS(INTC2_BASE + INT2SMSKCR1));
+     }
+ }
+ 
+@@ -204,8 +218,11 @@ my_handle_simple_irq(unsigned int irq, struct irq_desc *desc)
+     handle_simple_irq(irq, desc);
+ 
+     if ( irq == IRQ_VPU5HD2_H ){
+-        val = 0xFFFFFFFF; /* tentative : mask all INT2SMSKRG1 */
++	val = 1 << 4;
+         writel( val, IO_ADDRESS( INTC2_BASE + INT2SMSKRG1 ));
++    } else if (irq == IRQ_VIO6C) {
++	val = 1 << 8;
++	writel(val, IO_ADDRESS(INTC2_BASE + INT2SMSKRG1));
+     }
+ }
+ 
+-- 
+1.7.0.4
+
