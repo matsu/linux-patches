@@ -1,0 +1,40 @@
+From c2dff861d80bc6daad77b6c72c8fe2c8339ddfee Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 20 Jun 2012 18:18:38 +0900
+Subject: [PATCH 54/80] rcarvin: remove useless size limit check
+
+VIN can capture image sized larger than NTSC size.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |    7 -------
+ 1 files changed, 0 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 51cba83..cbea6e9 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -110,9 +110,6 @@
+ #define V0C8B 0x00F4
+ #define V0C8C 0x00F8
+ 
+-#define NTSC_WIDTH 720
+-#define NTSC_HEIGHT 486
+-
+ #define BUF_OFF		0x04
+ #define MB_NUM		3
+ #define SINGLE_BUF	0
+@@ -929,10 +926,6 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 		vin_write(pcdev, V0ELPrC, top_offset + cam->height - 1);
+ 	}
+ 
+-	if ((cam_subrect->width > NTSC_WIDTH) ||
+-		 (cam_subrect->height > NTSC_HEIGHT))
+-		return -EINVAL;
+-
+ 	/* Set Post-Clip */
+ 	vin_write(pcdev, V0SPPoC, 0);
+ 	vin_write(pcdev, V0SLPoC, 0);
+-- 
+1.7.0.4
+
