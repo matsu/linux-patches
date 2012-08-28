@@ -1,0 +1,34 @@
+From 3461f95d13bdb5ad9f62c4b124b1efc4d840f32d Mon Sep 17 00:00:00 2001
+From: mukawa <mukawa@igel.co.jp>
+Date: Wed, 4 Jul 2012 16:58:12 +0900
+Subject: [PATCH 57/80] rcarvin: Adjust capture mode settings in progressive input
+
+In the continuous mode, progressive input must be captured as an entire
+frame within each of the odd/even fields that it returns.
+VIN should output both fields since in this case they must consist of
+each valid frame.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index edfc870..879f8bf 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -440,7 +440,10 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		mc = VIN_VNMC_IM_FULL | VIN_VNMC_FOC;
+ 		break;
+ 	default:
+-		mc = VIN_VNMC_IM_ODD;
++		if (is_continuous_transfer(pcdev))
++			mc = VIN_VNMC_IM_ODD_EVEN;
++		else
++			mc = VIN_VNMC_IM_ODD;
+ 		break;
+ 	}
+ 
+-- 
+1.7.0.4
+
