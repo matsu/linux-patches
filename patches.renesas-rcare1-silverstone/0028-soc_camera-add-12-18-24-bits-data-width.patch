@@ -1,0 +1,47 @@
+From 0bdeff8d652a71c9ced4006e593a114d13c452f3 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 31 May 2012 12:36:42 +0900
+Subject: [PATCH 28/80] soc_camera: add 12/18/24 bits data width
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ include/media/soc_camera.h |   19 ++++++++++++-------
+ 1 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/include/media/soc_camera.h b/include/media/soc_camera.h
+index b8289c2..e681d21 100644
+--- a/include/media/soc_camera.h
++++ b/include/media/soc_camera.h
+@@ -237,16 +237,21 @@ static inline struct v4l2_queryctrl const *soc_camera_find_qctrl(
+ #define SOCAM_DATAWIDTH_8		(1 << 7)
+ #define SOCAM_DATAWIDTH_9		(1 << 8)
+ #define SOCAM_DATAWIDTH_10		(1 << 9)
+-#define SOCAM_DATAWIDTH_15		(1 << 10)
+-#define SOCAM_DATAWIDTH_16		(1 << 11)
+-#define SOCAM_PCLK_SAMPLE_RISING	(1 << 12)
+-#define SOCAM_PCLK_SAMPLE_FALLING	(1 << 13)
+-#define SOCAM_DATA_ACTIVE_HIGH		(1 << 14)
+-#define SOCAM_DATA_ACTIVE_LOW		(1 << 15)
++#define SOCAM_DATAWIDTH_12		(1 << 10)
++#define SOCAM_DATAWIDTH_15		(1 << 11)
++#define SOCAM_DATAWIDTH_16		(1 << 12)
++#define SOCAM_DATAWIDTH_18		(1 << 13)
++#define SOCAM_DATAWIDTH_24		(1 << 14)
++#define SOCAM_PCLK_SAMPLE_RISING	(1 << 15)
++#define SOCAM_PCLK_SAMPLE_FALLING	(1 << 16)
++#define SOCAM_DATA_ACTIVE_HIGH		(1 << 17)
++#define SOCAM_DATA_ACTIVE_LOW		(1 << 18)
+ 
+ #define SOCAM_DATAWIDTH_MASK (SOCAM_DATAWIDTH_4 | SOCAM_DATAWIDTH_8 | \
+ 			      SOCAM_DATAWIDTH_9 | SOCAM_DATAWIDTH_10 | \
+-			      SOCAM_DATAWIDTH_15 | SOCAM_DATAWIDTH_16)
++			      SOCAM_DATAWIDTH_12 | SOCAM_DATAWIDTH_15 | \
++			      SOCAM_DATAWIDTH_16 | SOCAM_DATAWIDTH_18 | \
++			      SOCAM_DATAWIDTH_24)
+ 
+ static inline unsigned long soc_camera_bus_param_compatible(
+ 			unsigned long camera_flags, unsigned long bus_flags)
+-- 
+1.7.0.4
+
