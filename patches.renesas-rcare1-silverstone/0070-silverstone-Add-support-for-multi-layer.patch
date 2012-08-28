@@ -1,0 +1,64 @@
+From a742f59ea5042be750e47845f075bf0f56f903f4 Mon Sep 17 00:00:00 2001
+From: Takanari Hayama <taki@igel.co.jp>
+Date: Tue, 27 Dec 2011 13:27:47 +0900
+Subject: [PATCH 70/80] silverstone: Add support for multi-layer.
+
+This sample setting creates the following fbdevs.
+
+/dev/fb0 - 16bpp (Layer 0)
+/dev/fb1 - 16bpp (Layer 1)
+/dev/fb2 - 32bpp (Layer 2 and 3)
+/dev/fb3 - 32bpp (Layer 4 and 5)
+/dev/fb4 - 16bpp (Layer 6)
+/dev/fb5 - 16bpp (Layer 7)
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ arch/arm/mach-rcar/board-silverstone.c |   31 +++++++++++++++++++++++++++++++
+ 1 files changed, 31 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index 6cd7158..102aa83 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -607,6 +607,37 @@ static struct rcar_reso_info rcar_reso_par = {
+ 		.vder = 795,
+ 		.vsp  = 809,
+ 	},
++	.fb_desc[0] = {
++		.caps	= RCAR_FBCAPS_NONE,
++		.index1	= 0,
++		.index2	= 0,
++	},
++	.fb_desc[1] = {
++		.caps	= RCAR_FBCAPS_NONE,
++		.index1	= 1,
++		.index2	= 1,
++	},
++	.fb_desc[2] = {
++		.caps	= RCAR_FBCAPS_32BIT,
++		.index1	= 2,
++		.index2	= 3,
++	},
++	.fb_desc[3] = {
++		.caps	= RCAR_FBCAPS_32BIT,
++		.index1	= 4,
++		.index2	= 5,
++	},
++	.fb_desc[4] = {
++		.caps	= RCAR_FBCAPS_NONE,
++		.index1	= 6,
++		.index2	= 6,
++	},
++	.fb_desc[5] = {
++		.caps	= RCAR_FBCAPS_NONE,
++		.index1	= 7,
++		.index2	= 7,
++	},
++	.fb_num = 6
+ };
+ 
+ static struct resource rcar_du_resources[] = {
+-- 
+1.7.0.4
+
