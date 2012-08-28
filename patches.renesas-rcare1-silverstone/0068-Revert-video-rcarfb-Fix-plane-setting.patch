@@ -1,0 +1,330 @@
+From e37c8025f503bd829cca281fa6b157d464dcd969 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Tue, 14 Aug 2012 18:50:16 +0900
+Subject: [PATCH 68/80] Revert "video: rcarfb: Fix plane setting"
+
+This reverts commit a799db1855ea917f1dc1e6154c393a15b8a4ec4c.
+
+Conflicts:
+
+	include/video/rcarfb.h
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/video/rcarfb.c |  161 +++++++++++++++++++++++++++++++++--------------
+ include/video/rcarfb.h |   27 ++++-----
+ 2 files changed, 125 insertions(+), 63 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 36136f5..5227137 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -187,7 +187,7 @@ static int du_check_disp_mode(unsigned long xres, unsigned long yres)
+ 	return mode;
+ }
+ 
+-static void du_set_plane(struct rcar_du_priv *priv, unsigned long plane_no)
++static void du_set_plane(struct rcar_du_priv *priv, int plane_no)
+ {
+ 	struct rcar_plane_param *pl;
+ 	struct rcar_pos_param moni, mem;
+@@ -198,22 +198,6 @@ static void du_set_plane(struct rcar_du_priv *priv, unsigned long plane_no)
+ 	mem = pl->mem;
+ 	disp = pl->disp;
+ 
+-	if (priv->plane[plane_no].plane_pixel == BITPARPIXEL_16) {
+-		/* 16bpp */
+-		du_write(priv, P1DDCR4 + (plane_no * PLANE_OFF),\
+-		 CODE_DDCR4 | (du_read(priv, P1DDCR4 + \
+-		  (plane_no * PLANE_OFF)) & ~0x07));
+-	} else {
+-		/* 32bpp */
+-		du_write(priv, P1DDCR4 + (plane_no * PLANE_OFF), \
+-			 CODE_DDCR4 | ((du_read(priv, P1DDCR4 + \
+-			 (plane_no * PLANE_OFF))) & ~0x07) | 0x01);
+-	}
+-
+-	/* for plane */
+-	du_write(priv, P1MR + (plane_no * PLANE_OFF),
+-		 MODE_16BPP_32BPP_PnMR);
+-	du_write(priv, P1MWR + (plane_no * PLANE_OFF), disp.sx);
+ 	du_write(priv, P1ALPHAR + (plane_no * PLANE_OFF), pl->alpha);
+ 	du_write(priv, P1DSXR + (plane_no * PLANE_OFF), disp.sx);
+ 	du_write(priv, P1DSYR + (plane_no * PLANE_OFF), disp.sy);
+@@ -230,39 +214,117 @@ static void du_set_plane(struct rcar_du_priv *priv, unsigned long plane_no)
+ 
+ }
+ 
+-static void du_set_plane_mode(struct rcar_du_priv *priv,
+-				struct fb_info *info, unsigned long plane_no)
++static void du_set_plane_mode(struct rcar_du_priv *priv, int bpp,
++							struct fb_info *info)
+ {
++	unsigned long dppr, dshpr;
++	unsigned long xres, yres;
+ 	unsigned long offset;
++	struct rcar_plane_param *plane1;
++	struct rcar_size_param disp1;
+ 
++	plane1 = &priv->plane[PLANE1];
++	disp1 = plane1->disp;
++	xres = disp1.sx;
++	yres = disp1.sy;
+ 	offset = info->var.xres * info->var.yres * info->var.bits_per_pixel / 8;
+ 
+-	du_write(priv, DEFR4, BPP16_DEFR4);
++	dppr = du_read(priv, DPPR);
++	dppr &= ~ALL_DPE;
++
++	dshpr = du_read(priv, DSHPR);
++	dshpr &= MASK_PRIL;
+ 
+-	du_write(priv, DS2PR, ((plane_no + 1) << (28 - (4 * plane_no))));
++	if (bpp == BITPARPIXEL_16) {
++		/* In case of 16BPP, use the plane1 */
++		du_write(priv, DEFR4, BPP16_DEFR4);
++		du_write(priv, P1DDCR, BPP16_DDCR);
++
++		dppr &= ~DPS8_MASK;
++		du_write(priv, DPPR, dppr | BPP16_DPPR);/* plane1 */
++		du_write(priv, DSHPR, (dshpr | BPP16_PRIL_DSHPR));
++	} else {
++		/* In case of 32BPP, use the plane1 and plane2 */
++		du_write(priv, DEFR4, BPP32_DEFR4);
++		du_write(priv, P1DDCR, BPP32AR_DDCR);
++		du_write(priv, P2DDCR, BPP32GB_DDCR);
++
++		dppr &= ~(DPS8_MASK | DPS7_MASK);
++		du_write(priv, DPPR, dppr | BPP32_DPPR);/* plane1&2 */
++		du_write(priv, DSHPR, (dshpr | BPP32_PRIL_DSHPR));
++	}
+ 
+-	/* set plane param */
+-	priv->plane[plane_no].plane_pixel = info->var.bits_per_pixel;
+-	priv->plane[plane_no].alpha = DEFAULT_PnALPHAR;
+-	priv->plane[plane_no].disp.sx = info->var.xres;
+-	priv->plane[plane_no].disp.sy = info->var.yres;
+-	priv->plane[plane_no].moni.px = DEFAULT_PnDPXR;
+-	priv->plane[plane_no].moni.py = DEFAULT_PnDPYR;
++	/* for plane1 */
++	du_write(priv, P1MR, MODE_16BPP_PnMR);
+ 
+-	priv->plane[plane_no].disp_area0_base =
++	du_write(priv, P1MWR, info->var.xres);
++
++	priv->plane[PLANE1].alpha = DEFAULT_PnALPHAR;
++	priv->plane[PLANE1].disp.sx = info->var.xres;
++	priv->plane[PLANE1].disp.sy = info->var.yres;
++	priv->plane[PLANE1].moni.px = DEFAULT_PnDPXR;
++	priv->plane[PLANE1].moni.py = DEFAULT_PnDPYR;
++
++	priv->plane[PLANE1].disp_area0_base =
+ 		(info->fix.smem_start & PnDSA_MASK);
+-	priv->plane[plane_no].disp_area1_base =
++	priv->plane[PLANE1].disp_area1_base =
+ 		((info->fix.smem_start + offset) & PnDSA_MASK);
+ 
+-	priv->plane[plane_no].mem.px = DEFAULT_PnSPXR;
+-	priv->plane[plane_no].mem.py = DEFAULT_PnSPYR;
+-	priv->plane[plane_no].waspr = DEFAULT_PnWASPR;
+-	priv->plane[plane_no].wamwr = DEFAULT_PnWAMWR;
+-	priv->plane[plane_no].btr = DEFAULT_PnBTR;
+-	priv->plane[plane_no].mlr = DEFAULT_PnMLR;
++	priv->plane[PLANE1].mem.px = DEFAULT_PnSPXR;
++	priv->plane[PLANE1].mem.py = DEFAULT_PnSPYR;
++	priv->plane[PLANE1].waspr = DEFAULT_PnWASPR;
++	priv->plane[PLANE1].wamwr = DEFAULT_PnWAMWR;
++	priv->plane[PLANE1].btr = DEFAULT_PnBTR;
++	priv->plane[PLANE1].mlr = DEFAULT_PnMLR;
+ 
+ 	/* set register */
+-	du_set_plane(priv, plane_no);
++	du_set_plane(priv, PLANE1);
++
++	priv->plane[PLANE1].plane_pixel = bpp;
++	priv->plane[PLANE1].mwx = (info->var.xres * bpp / BYTEPIXEL);
++	priv->plane[PLANE1].disp_area = DISPLAY_AREA0;
++	priv->plane[PLANE1].disp_area0_base =
++		 (info->fix.smem_start & PnDSA_MASK);
++	priv->plane[PLANE1].disp_area1_base =
++		 ((info->fix.smem_start + offset) & PnDSA_MASK);
++	priv->plane_area = DISP_PLANE1;
++
++	if (priv->plane[PLANE1].plane_pixel == BITPARPIXEL_32) {
++
++		/* for plane2 */
++		du_write(priv, P2MWR, info->var.xres);
++		du_write(priv, P2MR, MODE_16BPP_PnMR);
++
++		/* use the value of plane1 */
++		priv->plane[PLANE2].alpha = DEFAULT_PnALPHAR;
++		priv->plane[PLANE2].disp.sx = info->var.xres;
++		priv->plane[PLANE2].disp.sy = info->var.yres;
++		priv->plane[PLANE2].moni.px = DEFAULT_PnDPXR;
++		priv->plane[PLANE2].moni.py = DEFAULT_PnDPYR;
++		priv->plane[PLANE2].disp_area0_base =
++			 (info->fix.smem_start & PnDSA_MASK);
++		priv->plane[PLANE2].disp_area1_base =
++			 ((info->fix.smem_start + offset) & PnDSA_MASK);
++
++		priv->plane[PLANE2].mem.px = DEFAULT_PnSPXR;
++		priv->plane[PLANE2].mem.py = DEFAULT_PnSPYR;
++		priv->plane[PLANE2].waspr = DEFAULT_PnWASPR;
++		priv->plane[PLANE2].wamwr = DEFAULT_PnWAMWR;
++		priv->plane[PLANE2].btr = DEFAULT_PnBTR;
++		priv->plane[PLANE2].mlr = DEFAULT_PnMLR;
++
++		/* set register */
++		du_set_plane(priv, PLANE2);
++
++		priv->plane[PLANE2].plane_pixel = bpp;
++		priv->plane[PLANE2].mwx = (info->var.xres * bpp / BYTEPIXEL);
++		priv->plane[PLANE2].disp_area = DISPLAY_AREA0;
++		priv->plane[PLANE2].disp_area0_base =
++			 (info->fix.smem_start & PnDSA_MASK);
++		priv->plane[PLANE2].disp_area1_base =
++			 ((info->fix.smem_start + offset) & PnDSA_MASK);
++		priv->plane_area |= DISP_PLANE2;
++	}
+ 
+ 	return;
+ }
+@@ -321,9 +383,12 @@ static int rcar_du_setup_clocks(struct rcar_du_priv *priv,
+ 	du_write(priv, DEFR3, DEFAULT_DEFR3);
+ 	du_write(priv, DEFR6, DEFAULT_DEFR6);
+ 
+-	du_write(priv, DORCR,
+-		PG2T_DORCR | DK2S_DORCR | PG2D_DS2_DORCR | DPRS_DORCR);
+-	du_write(priv, DPTSR, DPTSR_ALL);
++	/* Display putput Route 1 Data selected Pin Generate 1.
++	   Pin Generate 1 input data select 1. */
++	du_write(priv, DORCR, du_read(priv, DORCR) | DPRS_DORCR);
++	du_write(priv, DPTSR,
++		DPTSR_P2DK | DPTSR_P1DK | DPTSR_P2TS | DPTSR_P1TS);
++	du_write(priv, DS2PR, S2S2_2 | S2S1_1);
+ 
+ 	/* Calculate Frequency */
+ 	frq = priv->dispdev->disp_par[mode].dot_clock;
+@@ -392,7 +457,7 @@ static int rcar_du_start(struct rcar_du_priv *priv)
+ 	priv->bit_per_pixel = info->var.bits_per_pixel;
+ 
+ 	/* plane setting */
+-	du_set_plane_mode(priv, info, priv->plane_area);
++	du_set_plane_mode(priv, info->var.bits_per_pixel, info);
+ 
+ 	/* Interrupt VBK2 Enable */
+ 	du_write(priv, D2IER, VBK2_D2SSR);
+@@ -536,9 +601,6 @@ static int rcar_du_set_par(struct fb_info *info)
+ 	struct rcar_du_priv *priv = info->par;
+ 	struct fb_var_screeninfo *var = &info->var;
+ 	int cur_mode, new_mode, ret = 0;
+-	unsigned long plane_no;
+-
+-	plane_no = priv->plane_area;
+ 
+ 	/* check the resolution */
+ 	new_mode = du_check_disp_mode(var->xres, var->yres);
+@@ -567,10 +629,10 @@ static int rcar_du_set_par(struct fb_info *info)
+ 
+ 		/* color setting */
+ 		if (var->bits_per_pixel == BITPARPIXEL_16) {
+-			du_set_plane_mode(priv, info, plane_no);
++			du_set_plane_mode(priv, BITPARPIXEL_16, info);
+ 		} else if (var->bits_per_pixel == BITPARPIXEL_24 ||
+ 			   var->bits_per_pixel == BITPARPIXEL_32) {
+-			du_set_plane_mode(priv, info, plane_no);
++			du_set_plane_mode(priv, BITPARPIXEL_32, info);
+ 		}
+ 		/* update param */
+ 		priv->bit_per_pixel = var->bits_per_pixel;
+@@ -659,10 +721,13 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 		goto err1;
+ 	}
+ 
+-	priv->plane_area = DISP_PLANE_NUM;
+ 	priv->irq = i;
+ 	priv->base = ioremap_nocache(res->start, (res->end - res->start) + 1);
+-	priv->dispdev = reso_info = pdev->dev.platform_data;
++
++	for (i = 0; i < RESOLUTION_NUM; i++) {
++		priv->dispdev = reso_info = pdev->dev.platform_data;
++		reso_info++;
++	}
+ 
+ 	info = framebuffer_alloc(0, &pdev->dev);
+ 	if (!info) {
+diff --git a/include/video/rcarfb.h b/include/video/rcarfb.h
+index e661266..8a943b4 100644
+--- a/include/video/rcarfb.h
++++ b/include/video/rcarfb.h
+@@ -42,15 +42,6 @@ struct rcar_reso_info {
+ 	struct rcar_disp_info disp_par[RESOLUTION_NUM];
+ };
+ 
+-#define DISP_PLANE1	0
+-#define DISP_PLANE2	1
+-#define DISP_PLANE3	2
+-#define DISP_PLANE4	3
+-#define DISP_PLANE5	4
+-#define DISP_PLANE6	5
+-#define DISP_PLANE7	6
+-#define DISP_PLANE8	7
+-#define DISP_PLANE_NUM	DISP_PLANE1
+ 
+ #define RCARFB_SUPPORTBLANK	0
+ 
+@@ -104,6 +95,15 @@ struct rcar_reso_info {
+ #define DISPLAY_AREA0	0
+ #define DISPLAY_AREA1	1
+ 
++#define DISP_PLANE1	(1<<0)
++#define DISP_PLANE2	(1<<1)
++#define DISP_PLANE3	(1<<2)
++#define DISP_PLANE4	(1<<3)
++#define DISP_PLANE5	(1<<4)
++#define DISP_PLANE6	(1<<5)
++#define DISP_PLANE7	(1<<6)
++#define DISP_PLANE8	(1<<7)
++
+ /***** R-Car Display Unit Register Definitons *****/
+ /* Display control register offset definitions */
+ #define DSYSR		0x00000	/* display 1 */
+@@ -362,7 +362,7 @@ struct rcar_reso_info {
+ /* Display plane register offset definitions */
+ #define P1MR		0x00100 /* plane 1 */
+ #define PnDDDF_8BPP_PnMR	(0<<0)	/* 8bit */
+-#define PnDDDF_16BPP_32BPP_PnMR	(1<<0)	/* 16bit or 32bit */
++#define PnDDDF_16BPP_PnMR	(1<<0)	/* 16bit */
+ #define PnDDDF_ARGB_PnMR	(2<<0)	/* ARGB */
+ #define PnDDDF_YC_PnMR		(3<<0)	/* YC */
+ #define PnBM_MD_PnMR		(0<<4)	/* Manual display change mode */
+@@ -387,9 +387,8 @@ struct rcar_reso_info {
+ #define PnYCDF_YUYV_PnMR	(1<<20)	/* YUYV format */
+ #define PnVISL_VIN0_PnMR	(0<<26)	/* use Video Input 0 */
+ #define PnVISL_VIN1_PnMR	(1<<26)	/* use Video Input 1 */
+-#define MODE_16BPP_32BPP_PnMR	(PnDDDF_16BPP_32BPP_PnMR \
+-							| PnBM_MD_PnMR | \
+-							 PnSPIM_TPOFF_PnMR)
++#define MODE_16BPP_PnMR		(PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | \
++				 PnSPIM_TPOFF_PnMR)
+ #define MODE_RGB_PnMR		(PnDDDF_ARGB_PnMR | PnBM_MD_PnMR | \
+ 				 PnSPIM_TPOFF_PnMR)
+ 
+@@ -730,14 +729,12 @@ struct rcar_reso_info {
+ #define DPTSR_P1DK	(0x01 << 16)
+ #define DPTSR_P2TS	(0x01 << 1)
+ #define DPTSR_P1TS	(0x01 << 0)
+-#define DPTSR_ALL	0x00FF00FF
+ 
+ #define DAPTSR		0x11008
+ #define DS1PR		0x11020
+ #define DS2PR		0x11024
+ #define S2S2_2		(0x02 << 4)
+ #define S2S1_1		(0x01 << 0)
+-#define S2S8_1		(0x01 << 28)
+ 
+ /* YC-RGB conversion coefficient register offset definitions */
+ #define YNCR		0x11080
+-- 
+1.7.0.4
+
