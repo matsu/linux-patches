@@ -1,0 +1,28 @@
+From 4c070bef88715af821600065430a9c4a7fb3f0a0 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 14 Jun 2012 19:41:46 +0900
+Subject: [PATCH 44/80] mediabus: fix bits_per_sample value for V4L2_MBUS_FMT_RGB888_2X12_LE
+
+It must be 12, not 24.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/soc_mediabus.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/soc_mediabus.c b/drivers/media/video/soc_mediabus.c
+index e0e2d55..4e7f342 100644
+--- a/drivers/media/video/soc_mediabus.c
++++ b/drivers/media/video/soc_mediabus.c
+@@ -98,7 +98,7 @@ static const struct soc_mbus_pixelfmt mbus_fmt[] = {
+ 	[MBUS_IDX(RGB888_2X12_LE)] = {
+ 		.fourcc			= V4L2_PIX_FMT_RGB32,
+ 		.name			= "RGB888/32bpp",
+-		.bits_per_sample	= 24,
++		.bits_per_sample	= 12,
+ 		.packing		= SOC_MBUS_PACKING_EXTEND32,
+ 		.order			= SOC_MBUS_ORDER_LE,
+ 	},
+-- 
+1.7.0.4
+
