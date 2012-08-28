@@ -1,0 +1,29 @@
+From 6c21b3443abd1f789ebf09443ac853817e8875d9 Mon Sep 17 00:00:00 2001
+From: Takanari Hayama <taki@igel.co.jp>
+Date: Mon, 9 Jan 2012 13:34:56 +0900
+Subject: [PATCH 74/80] rcarfb: refuse NV12/21 for non-32bits layer.
+
+An update from Andi on 2011-12-29.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/video/rcarfb.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 5079127..db13032 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -887,6 +887,9 @@ static int rcar_ioctl (struct fb_info *info, unsigned int cmd, unsigned long arg
+ 		  if (care1_format_to_depth(config.format) > 16 && !(priv->dispdev->fb_desc[fb_num].caps & RCAR_FBCAPS_32BIT))
+ 			  return -ENOTSUPP;
+ 
++		  if (((config.format == CARE1_FORMAT_NV12) || (config.format == CARE1_FORMAT_NV12)) && !(priv->dispdev->fb_desc[fb_num].caps & RCAR_FBCAPS_32BIT))
++			  return -ENOTSUPP;
++
+ 		  priv->planeconfig[fb_num] = config;
+ 
+ 		  du_set_plane_mode_planeconfig( fb_num, priv, &config );
+-- 
+1.7.0.4
+
