@@ -1,0 +1,27 @@
+From 692beb92a8d9bada090b8dc3590988c476f0bc13 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 14 Jun 2012 17:43:59 +0900
+Subject: [PATCH 43/80] rcarvin: remove unsupported input mediabus in rcar_vin_get_formats()
+
+V4L2_MBUS_FMT_YUYV8_2X8_LE must be unsupported by VIN.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |    1 -
+ 1 files changed, 0 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 6d9bdcb..9c78a4f 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -1157,7 +1157,6 @@ static int rcar_vin_get_formats(struct soc_camera_device *icd, unsigned int idx,
+ 
+ 	switch (code) {
+ 	case V4L2_MBUS_FMT_YUYV8_1X16_BE:
+-	case V4L2_MBUS_FMT_YUYV8_2X8_LE:
+ 	case V4L2_MBUS_FMT_YUYV8_2X8_BE:
+ 		if (cam->extra_fmt)
+ 			break;
+-- 
+1.7.0.4
+
