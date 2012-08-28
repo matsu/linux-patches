@@ -1,0 +1,1018 @@
+From 8777b7cf388a49edca0f91804bf13658775bb574 Mon Sep 17 00:00:00 2001
+From: Takanari Hayama <taki@igel.co.jp>
+Date: Tue, 27 Dec 2011 13:26:41 +0900
+Subject: [PATCH 69/80] video: rcarfb: multi-layer support
+
+Alpha version of multi-layer supports with DU. This version
+supports RGB565, RGB888, and ARGB32.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/video/rcarfb.c |  565 ++++++++++++++++++++++++++++++++----------------
+ include/video/rcarfb.h |   78 +++++++-
+ 2 files changed, 459 insertions(+), 184 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 5227137..986676a 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -26,6 +26,7 @@
+ #include <linux/interrupt.h>
+ #include <linux/vmalloc.h>
+ #include <linux/ioctl.h>
++#include <asm/uaccess.h>
+ #include <linux/slab.h>
+ #include <video/rcarfb.h>
+ #include <asm/atomic.h>
+@@ -39,7 +40,11 @@
+ #define DEV_NAME	"rcarfb"
+ #define PLANE_NUM	2
+ 
++#if defined(CONFIG_SUPPORT_LCD_PANNEL)
++static char __devinitdata *mode_option = "800x480-16";
++#else
+ static char __devinitdata *mode_option = "640x480-16";
++#endif
+ 
+ struct rcar_pos_param {
+ 	unsigned long	px;	/* position of x */
+@@ -67,16 +72,20 @@ struct rcar_plane_param {
+ 	int disp_area;		/* use plan number flag */
+ };
+ 
++
++
+ struct rcar_du_priv {
+ 	void __iomem *base;
+ 	int irq;
+ 	struct device *dev;
+ 
+ 	u32 pseudo_palette[PALETTE_NR];
+-	struct fb_info *info;
++
++	struct fb_info   *info[RCAR_FB_MAX];
++	CarE1PlaneConfig  planeconfig[RCAR_FB_MAX];
++
+ 	dma_addr_t dma_handle;
+ 
+-	int		bit_per_pixel;
+ 	struct rcar_size_param res;
+ 	struct rcar_size_param offset;
+ 	int		blanked;
+@@ -88,7 +97,7 @@ struct rcar_du_priv {
+ };
+ 
+ static struct fb_fix_screeninfo rcar_du_fix  = {
+-	.id =		"R-Car DU",
++	.id =		"R-Car DU plane ",
+ 	.type =		FB_TYPE_PACKED_PIXELS,
+ 	.visual =	FB_VISUAL_TRUECOLOR,
+ 	.accel =	FB_ACCEL_NONE,
+@@ -214,8 +223,8 @@ static void du_set_plane(struct rcar_du_priv *priv, int plane_no)
+ 
+ }
+ 
+-static void du_set_plane_mode(struct rcar_du_priv *priv, int bpp,
+-							struct fb_info *info)
++
++static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv, CarE1PlaneConfig *planeconfig )
+ {
+ 	unsigned long dppr, dshpr;
+ 	unsigned long xres, yres;
+@@ -223,110 +232,151 @@ static void du_set_plane_mode(struct rcar_du_priv *priv, int bpp,
+ 	struct rcar_plane_param *plane1;
+ 	struct rcar_size_param disp1;
+ 
+-	plane1 = &priv->plane[PLANE1];
++	int index1 = priv->dispdev->fb_desc[fb_num].index1;
++	int index2 = priv->dispdev->fb_desc[fb_num].index2;
++	int plane_bit1 = DISP_PLANE1 << index1;
++	int plane_bit2 = DISP_PLANE1 << index2;
++
++	int shift1 = 28 - 4 * index1;
++	int shift2 = 28 - 4 * index2;
++	int mask1  = 0x7 << shift1;
++	int mask2  = 0x7 << shift2;
++
++	int alphamode = 0;
++
++	if (planeconfig->options & CARE1_PLANE_OPACITY) {
++		alphamode = PnSPIM_ALPOFF_PnMR;
++	}
++	else if (planeconfig->options & CARE1_PLANE_ALPHACHANNEL) {
++		if (planeconfig->depth == 32)
++			alphamode = PnSPIM_TPOFF_PnMR;
++	}
++
++	printk(KERN_DEBUG "index1 %d\n", index1);
++	printk(KERN_DEBUG "index2 %d\n", index2);
++	plane1 = &priv->plane[index1];
++
+ 	disp1 = plane1->disp;
+ 	xres = disp1.sx;
+ 	yres = disp1.sy;
+-	offset = info->var.xres * info->var.yres * info->var.bits_per_pixel / 8;
++	offset = planeconfig->height * planeconfig->pitch;
+ 
+ 	dppr = du_read(priv, DPPR);
+-	dppr &= ~ALL_DPE;
++	dppr &= ~( (DPE << shift1) | (DPE << shift2) );
+ 
+ 	dshpr = du_read(priv, DSHPR);
+ 	dshpr &= MASK_PRIL;
+ 
+-	if (bpp == BITPARPIXEL_16) {
++	if (planeconfig->depth == 16) {
+ 		/* In case of 16BPP, use the plane1 */
+ 		du_write(priv, DEFR4, BPP16_DEFR4);
+-		du_write(priv, P1DDCR, BPP16_DDCR);
++		du_write(priv, PnDDCR(index1), BPP16_DDCR);
+ 
+-		dppr &= ~DPS8_MASK;
+-		du_write(priv, DPPR, dppr | BPP16_DPPR);/* plane1 */
++		dppr &= ~mask1;
++		du_write(priv, DPPR, dppr | ((DPE | index1) << shift1));/* plane1 */
+ 		du_write(priv, DSHPR, (dshpr | BPP16_PRIL_DSHPR));
+ 	} else {
+ 		/* In case of 32BPP, use the plane1 and plane2 */
+ 		du_write(priv, DEFR4, BPP32_DEFR4);
+-		du_write(priv, P1DDCR, BPP32AR_DDCR);
+-		du_write(priv, P2DDCR, BPP32GB_DDCR);
++		du_write(priv, PnDDCR(index1), BPP32AR_DDCR);
++		du_write(priv, PnDDCR(index2), BPP32GB_DDCR);
+ 
+-		dppr &= ~(DPS8_MASK | DPS7_MASK);
+-		du_write(priv, DPPR, dppr | BPP32_DPPR);/* plane1&2 */
++		dppr &= ~(mask1 | mask2);
++		du_write(priv, DPPR, dppr | ((DPE | index2) << shift1) | ((DPE | index1) << shift2));/* plane1&2 */
+ 		du_write(priv, DSHPR, (dshpr | BPP32_PRIL_DSHPR));
+ 	}
+ 
++//	du_write(priv, DPPR, 0x00000000);
++	printk(KERN_DEBUG "DPPR 0x%08lx\n", du_read(priv,DPPR));
++
+ 	/* for plane1 */
+-	du_write(priv, P1MR, MODE_16BPP_PnMR);
++	du_write(priv, PnMR(index1), MODE_16BPP_PnMR | alphamode);
+ 
+-	du_write(priv, P1MWR, info->var.xres);
++	du_write(priv, PnMWR(index1), planeconfig->width);
+ 
+-	priv->plane[PLANE1].alpha = DEFAULT_PnALPHAR;
+-	priv->plane[PLANE1].disp.sx = info->var.xres;
+-	priv->plane[PLANE1].disp.sy = info->var.yres;
+-	priv->plane[PLANE1].moni.px = DEFAULT_PnDPXR;
+-	priv->plane[PLANE1].moni.py = DEFAULT_PnDPYR;
++	priv->plane[index1].alpha = planeconfig->opacity;
++	priv->plane[index1].disp.sx = planeconfig->width;
++	priv->plane[index1].disp.sy = planeconfig->height;
++	priv->plane[index1].moni.px = planeconfig->x;
++	priv->plane[index1].moni.py = planeconfig->y;
+ 
+-	priv->plane[PLANE1].disp_area0_base =
+-		(info->fix.smem_start & PnDSA_MASK);
+-	priv->plane[PLANE1].disp_area1_base =
+-		((info->fix.smem_start + offset) & PnDSA_MASK);
++	priv->plane[index1].disp_area0_base =
++		(planeconfig->phys & PnDSA_MASK);
++	priv->plane[index1].disp_area1_base =
++		((planeconfig->phys + offset) & PnDSA_MASK);
+ 
+-	priv->plane[PLANE1].mem.px = DEFAULT_PnSPXR;
+-	priv->plane[PLANE1].mem.py = DEFAULT_PnSPYR;
+-	priv->plane[PLANE1].waspr = DEFAULT_PnWASPR;
+-	priv->plane[PLANE1].wamwr = DEFAULT_PnWAMWR;
+-	priv->plane[PLANE1].btr = DEFAULT_PnBTR;
+-	priv->plane[PLANE1].mlr = DEFAULT_PnMLR;
++	priv->plane[index1].mem.px = DEFAULT_PnSPXR;
++	priv->plane[index1].mem.py = DEFAULT_PnSPYR;
++	priv->plane[index1].waspr = DEFAULT_PnWASPR;
++	priv->plane[index1].wamwr = DEFAULT_PnWAMWR;
++	priv->plane[index1].btr = DEFAULT_PnBTR;
++	priv->plane[index1].mlr = DEFAULT_PnMLR;
+ 
+ 	/* set register */
+-	du_set_plane(priv, PLANE1);
++	du_set_plane(priv, index1);
+ 
+-	priv->plane[PLANE1].plane_pixel = bpp;
+-	priv->plane[PLANE1].mwx = (info->var.xres * bpp / BYTEPIXEL);
+-	priv->plane[PLANE1].disp_area = DISPLAY_AREA0;
+-	priv->plane[PLANE1].disp_area0_base =
+-		 (info->fix.smem_start & PnDSA_MASK);
+-	priv->plane[PLANE1].disp_area1_base =
+-		 ((info->fix.smem_start + offset) & PnDSA_MASK);
+-	priv->plane_area = DISP_PLANE1;
++	priv->plane[index1].plane_pixel = planeconfig->depth;
++	priv->plane[index1].mwx = planeconfig->pitch;
++	priv->plane[index1].disp_area = DISPLAY_AREA0;
++	priv->plane[index1].disp_area0_base =
++		 (planeconfig->phys & PnDSA_MASK);
++//	priv->plane[index1].disp_area1_base =
++//		 ((planeconfig->phys + offset) & PnDSA_MASK);
++	priv->plane_area |= plane_bit1;
+ 
+-	if (priv->plane[PLANE1].plane_pixel == BITPARPIXEL_32) {
++	if (planeconfig->depth == 32) {
+ 
+ 		/* for plane2 */
+-		du_write(priv, P2MWR, info->var.xres);
+-		du_write(priv, P2MR, MODE_16BPP_PnMR);
++		du_write(priv, PnMWR(index2), planeconfig->width);
++
++		// for the bottom-most plane do not use alpha blending
++		//if ((index1 == (priv->dispdev->fb_num-1)*2) || !(planeconfig->options & CARE1_PLANE_ALPHACHANNEL)) {
++		//	du_write(priv, PnMR(index1), (PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | PnSPIM_TPOFF_PnMR));
++		//	du_write(priv, PnMR(index2), (PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | PnSPIM_TPOFF_PnMR));
++		//}
++		//else {
++			du_write(priv, PnMR(index1), (PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | alphamode));
++			du_write(priv, PnMR(index2), (PnDDDF_16BPP_PnMR | PnBM_MD_PnMR | alphamode));
++		//}
+ 
+ 		/* use the value of plane1 */
+-		priv->plane[PLANE2].alpha = DEFAULT_PnALPHAR;
+-		priv->plane[PLANE2].disp.sx = info->var.xres;
+-		priv->plane[PLANE2].disp.sy = info->var.yres;
+-		priv->plane[PLANE2].moni.px = DEFAULT_PnDPXR;
+-		priv->plane[PLANE2].moni.py = DEFAULT_PnDPYR;
+-		priv->plane[PLANE2].disp_area0_base =
+-			 (info->fix.smem_start & PnDSA_MASK);
+-		priv->plane[PLANE2].disp_area1_base =
+-			 ((info->fix.smem_start + offset) & PnDSA_MASK);
+-
+-		priv->plane[PLANE2].mem.px = DEFAULT_PnSPXR;
+-		priv->plane[PLANE2].mem.py = DEFAULT_PnSPYR;
+-		priv->plane[PLANE2].waspr = DEFAULT_PnWASPR;
+-		priv->plane[PLANE2].wamwr = DEFAULT_PnWAMWR;
+-		priv->plane[PLANE2].btr = DEFAULT_PnBTR;
+-		priv->plane[PLANE2].mlr = DEFAULT_PnMLR;
++		priv->plane[index2].alpha = planeconfig->opacity;
++		priv->plane[index2].disp.sx = planeconfig->width;
++		priv->plane[index2].disp.sy = planeconfig->height;
++		priv->plane[index2].moni.px = planeconfig->x;
++		priv->plane[index2].moni.py = planeconfig->y;
++		priv->plane[index2].disp_area0_base =
++			 (planeconfig->phys & PnDSA_MASK);
++		//priv->plane[index2].disp_area1_base =
++		//	 ((planeconfig->phys + offset) & PnDSA_MASK);
++
++		priv->plane[index2].mem.px = DEFAULT_PnSPXR;
++		priv->plane[index2].mem.py = DEFAULT_PnSPYR;
++		priv->plane[index2].waspr = DEFAULT_PnWASPR;
++		priv->plane[index2].wamwr = DEFAULT_PnWAMWR;
++		priv->plane[index2].btr = DEFAULT_PnBTR;
++		priv->plane[index2].mlr = DEFAULT_PnMLR;
+ 
+ 		/* set register */
+-		du_set_plane(priv, PLANE2);
+-
+-		priv->plane[PLANE2].plane_pixel = bpp;
+-		priv->plane[PLANE2].mwx = (info->var.xres * bpp / BYTEPIXEL);
+-		priv->plane[PLANE2].disp_area = DISPLAY_AREA0;
+-		priv->plane[PLANE2].disp_area0_base =
+-			 (info->fix.smem_start & PnDSA_MASK);
+-		priv->plane[PLANE2].disp_area1_base =
+-			 ((info->fix.smem_start + offset) & PnDSA_MASK);
+-		priv->plane_area |= DISP_PLANE2;
++		du_set_plane(priv, index2);
++
++		priv->plane[index2].plane_pixel = planeconfig->depth;
++		priv->plane[index2].mwx = planeconfig->pitch;
++		priv->plane[index2].disp_area = DISPLAY_AREA0;
++		priv->plane[index2].disp_area0_base =
++			 (planeconfig->phys & PnDSA_MASK);
++		//priv->plane[index2].disp_area1_base =
++		//	 ((planeconfig->phys + offset) & PnDSA_MASK);
++		priv->plane_area |= plane_bit2;
+ 	}
++	else
++		priv->plane_area &= ~plane_bit2;
++	priv->plane_area = 4;
+ 
++	printk(KERN_DEBUG "plane_area 0x%08lx\n", priv->plane_area);
++	printk(KERN_DEBUG "DPPR 0x%08lx\n", du_read(priv,DPPR));
+ 	return;
++
+ }
+ 
+ static irqreturn_t rcar_du_irq(int irq, void *data)
+@@ -364,6 +414,7 @@ static void rcar_du_start_stop(struct rcar_du_priv *priv, int start)
+ 		du_write(priv, DSYSR, tmp | DRES_DSYSR);
+ 		clk_disable(priv->duclk);
+ 	}
++	printk(KERN_DEBUG "DPPR 0x%08lx\n", du_read(priv,DPPR));
+ }
+ 
+ static void rcar_du_stop(struct rcar_du_priv *priv)
+@@ -385,10 +436,11 @@ static int rcar_du_setup_clocks(struct rcar_du_priv *priv,
+ 
+ 	/* Display putput Route 1 Data selected Pin Generate 1.
+ 	   Pin Generate 1 input data select 1. */
+-	du_write(priv, DORCR, du_read(priv, DORCR) | DPRS_DORCR);
++//	du_write(priv, DORCR, du_read(priv, DORCR) | DPRS_DORCR);
+ 	du_write(priv, DPTSR,
+-		DPTSR_P2DK | DPTSR_P1DK | DPTSR_P2TS | DPTSR_P1TS);
+-	du_write(priv, DS2PR, S2S2_2 | S2S1_1);
++		 DPTSR_P8DK | DPTSR_P7DK | DPTSR_P6DK | DPTSR_P5DK | DPTSR_P4DK | DPTSR_P3DK | DPTSR_P2DK | DPTSR_P1DK |
++		 DPTSR_P8TS | DPTSR_P7TS | DPTSR_P6TS | DPTSR_P5TS | DPTSR_P4TS | DPTSR_P3TS | DPTSR_P2TS | DPTSR_P1TS);
++	du_write(priv, DS2PR, S2S8_8 | S2S7_7 | S2S6_6 | S2S5_5 | S2S4_4 | S2S3_3 | S2S2_2 | S2S1_1 );
+ 
+ 	/* Calculate Frequency */
+ 	frq = priv->dispdev->disp_par[mode].dot_clock;
+@@ -407,7 +459,8 @@ static int du_set_disp_timing(struct rcar_du_priv *priv, int mode)
+ 	int res_clks;
+ 	int ret = 0;
+ 
+-	info = priv->info;
++	/* We use first plane for display timings (TODO: allow independent configuration?) */
++	info = priv->info[0];
+ 	res_clks = priv->clock_info;
+ 
+ 	/* set dotclock */
+@@ -430,6 +483,10 @@ static int du_set_disp_timing(struct rcar_du_priv *priv, int mode)
+ 	/* Background Plane Output */
+ 	du_write(priv, DOOR2, DEFAULT_DOOR);
+ 
++
++	du_write(priv, DAPCR, 0x77730011);
++
++	printk(KERN_DEBUG "DPPR 0x%08lx\n", du_read(priv,DPPR));
+ 	return ret;
+ }
+ 
+@@ -441,7 +498,11 @@ static int rcar_du_start(struct rcar_du_priv *priv)
+ 	/* Request DU Clock Operation */
+ 	clk_enable(priv->duclk);
+ 
+-	info = priv->info;
++	/* We use first plane for display timings (TODO: allow independent configuration?) */
++	info = priv->info[0];
++	if (info == NULL)
++		return -ENODEV;
++
+ 	mode = du_check_disp_mode(info->var.xres, info->var.yres);
+ 	if (mode == MODE_ERROR)
+ 		return -EINVAL;
+@@ -454,10 +515,6 @@ static int rcar_du_start(struct rcar_du_priv *priv)
+ 	priv->res.sy = info->var.yres;
+ 	priv->offset.sx = 0;
+ 	priv->offset.sy = 0;
+-	priv->bit_per_pixel = info->var.bits_per_pixel;
+-
+-	/* plane setting */
+-	du_set_plane_mode(priv, info->var.bits_per_pixel, info);
+ 
+ 	/* Interrupt VBK2 Enable */
+ 	du_write(priv, D2IER, VBK2_D2SSR);
+@@ -534,11 +591,41 @@ static int rcar_du_blank(int blank_mode, struct fb_info *info)
+ 
+ }
+ 
++static int du_update_displaystart(int fb_num, struct rcar_du_priv *priv, CarE1PlaneConfig *planeconfig)
++{
++
++	int index1 = priv->dispdev->fb_desc[fb_num].index1;
++	int index2 = priv->dispdev->fb_desc[fb_num].index2;
++
++	unsigned long tmp;
++
++	// FIXME: set one plane only if 16bit only
++	priv->plane[index1].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
++	priv->plane[index2].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
++
++	du_write(priv, P1DSA0R + (index1   * PLANE_OFF), planeconfig->phys);
++	du_write(priv, P1DSA0R + ((index2) * PLANE_OFF), planeconfig->phys);
++
++	/* Change frame buffer */
++	tmp = du_read(priv, PnMR(index1));	// FIXME: only for one plane?
++	du_write(priv, PnMR(index1), PnDC_ON_PnMR | tmp);
++
++	while (1) {
++		if ((du_read(priv, D2SSR) & VBK2_D2SSR) == VBK2_D2SSR)
++			break;
++	}
++
++	return 0;
++}
++
+ static int rcar_du_pan_display(struct fb_var_screeninfo *var,
+ 			       struct fb_info *info)
+ {
+ 	struct rcar_du_priv *priv = info->par;
+ 
++	int fb_num = (info->fix.id[15] - '0');
++	int index1 = priv->dispdev->fb_desc[fb_num].index1;
++
+ 	unsigned long tmp;
+ 
+ 	if (var->xoffset != priv->offset.sx ||
+@@ -548,12 +635,14 @@ static int rcar_du_pan_display(struct fb_var_screeninfo *var,
+ 			/* display the area0 */
+ 			priv->offset.sx = var->xoffset;
+ 			priv->offset.sy = var->yoffset;
++
++			priv->planeconfig[fb_num].phys = info->fix.smem_start + info->var.yoffset * info->fix.line_length + info->var.xoffset * (info->var.bits_per_pixel/8);
+ 		} else {
+ 			return -EINVAL;
+ 		}
+ 		/* Change frame buffer */
+-		tmp = du_read(priv, P1MR);
+-		du_write(priv, P1MR, PnDC_ON_PnMR | tmp);
++		tmp = du_read(priv, PnMR(index1));	// FIXME: only for one plane?
++		du_write(priv, PnMR(index1), PnDC_ON_PnMR | tmp);
+ 	}
+ 
+ 	while (1) {
+@@ -567,6 +656,10 @@ static int rcar_du_pan_display(struct fb_var_screeninfo *var,
+ static int rcar_du_check_var(struct fb_var_screeninfo *var,
+ 	 struct fb_info *info)
+ {
++	struct rcar_du_priv *priv = info->par;
++
++	int fb_num = (info->fix.id[15] - '0');
++
+ 	switch (var->bits_per_pixel) {
+ 	case BITPARPIXEL_16:	/* RGB 565 */
+ 		var->red.offset    = 11;
+@@ -580,6 +673,9 @@ static int rcar_du_check_var(struct fb_var_screeninfo *var,
+ 		break;
+ 	case BITPARPIXEL_24:	/* RGB888 */
+ 	case BITPARPIXEL_32:	/* ARGB 8888 */
++		if (!(priv->dispdev->fb_desc[fb_num].caps & RCAR_FBCAPS_32BIT))
++			return -ENOTSUPP;
++
+ 		var->red.offset    = 16;
+ 		var->red.length    = 8;
+ 		var->green.offset  = 8;
+@@ -598,25 +694,35 @@ static int rcar_du_check_var(struct fb_var_screeninfo *var,
+ 
+ static int rcar_du_set_par(struct fb_info *info)
+ {
++	int fb_num = (info->fix.id[15] - '0');
++
+ 	struct rcar_du_priv *priv = info->par;
++	CarE1PlaneConfig *planeconfig = &priv->planeconfig[fb_num];
++
+ 	struct fb_var_screeninfo *var = &info->var;
+ 	int cur_mode, new_mode, ret = 0;
+ 
+-	/* check the resolution */
+-	new_mode = du_check_disp_mode(var->xres, var->yres);
+-	if (new_mode == MODE_ERROR)
+-		return -EINVAL;
++	/* We use first plane for display timings (TODO: allow independent configuration?) */
++	if (info->fix.id[15] == '0') {
++		/* check the resolution */
++		new_mode = du_check_disp_mode(var->xres, var->yres);
++		if (new_mode == MODE_ERROR)
++			return -EINVAL;
+ 
+-	cur_mode = du_check_disp_mode(priv->res.sx, priv->res.sy);
++		cur_mode = du_check_disp_mode(priv->res.sx, priv->res.sy);
+ 
+-	if (new_mode != cur_mode) {
+-		ret = du_set_disp_timing(priv, new_mode);
+-		if (ret)
+-			goto err1;
++		if (new_mode != cur_mode) {
++			ret = du_set_disp_timing(priv, new_mode);
++			if (ret)
++				goto err1;
+ 
+-		/* update param */
+-		priv->res.sx = var->xres;
+-		priv->res.sy = var->yres;
++			/* update param */
++			priv->res.sx = var->xres;
++			priv->res.sy = var->yres;
++
++			planeconfig->width = var->xres;
++			planeconfig->height = var->yres;
++		}
+ 	}
+ 
+ 	/* check the BPP */
+@@ -624,34 +730,85 @@ static int rcar_du_set_par(struct fb_info *info)
+ 	if (ret)
+ 		goto err1;
+ 
+-	if ((var->bits_per_pixel != priv->bit_per_pixel) ||
+-		(new_mode != cur_mode)) {
++//	if ((var->bits_per_pixel != priv->bit_per_pixel) ||
++//		(new_mode != cur_mode)) {
+ 
+ 		/* color setting */
++
+ 		if (var->bits_per_pixel == BITPARPIXEL_16) {
+-			du_set_plane_mode(priv, BITPARPIXEL_16, info);
++			planeconfig->depth = 16;
++			//du_set_plane_mode(priv, BITPARPIXEL_16, info);
+ 		} else if (var->bits_per_pixel == BITPARPIXEL_24 ||
+ 			   var->bits_per_pixel == BITPARPIXEL_32) {
+-			du_set_plane_mode(priv, BITPARPIXEL_32, info);
++			planeconfig->depth = 32;
++			//du_set_plane_mode(priv, BITPARPIXEL_32, info);
+ 		}
+ 		/* update param */
+-		priv->bit_per_pixel = var->bits_per_pixel;
+ 		info->fix.line_length = info->var.xres *
+ 						(info->var.bits_per_pixel / 8);
+-	}
+ 
++		planeconfig->pitch = info->var.xres *
++						(info->var.bits_per_pixel / 8);
++//	}
++
++	du_set_plane_mode_planeconfig( fb_num, priv, planeconfig );
+ 	/* start the DU */
+ 	rcar_du_start_stop(priv, DU_START);
+ 
++	printk(KERN_DEBUG "DPPR 0x%08lx\n", du_read(priv,DPPR));
+ 	return ret;
+ 
+ err1:
+-	memset(info->screen_base, 0,
+-		MAX_XRES * MAX_YRES * FB_BYTES * PLANE_NUM);
++	memset(info->screen_base, 0, info->fix.smem_len);
+ 
+ 	return ret;
+ }
+ 
++
++
++static int rcar_ioctl (struct fb_info *info, unsigned int cmd, unsigned long arg)
++{
++	int fb_num = (info->fix.id[15] - '0');
++	struct rcar_du_priv *priv = info->par;
++	CarE1PlaneConfig config;
++
++	switch (cmd) {
++	case CARE1_PLANE_GET_DESCRIPTION:
++		  if(copy_to_user((struct rcar_fb_desc*)arg, &priv->dispdev->fb_desc[fb_num], sizeof(struct rcar_fb_desc))!=0)
++			  return -EFAULT;
++
++		  return 0;
++
++	case CARE1_PLANE_SET_CONFIG:
++		  if(copy_from_user(&config, (CarE1PlaneConfig*)arg, sizeof(CarE1PlaneConfig))!=0)
++			  return -EFAULT;
++
++		  if (config.depth > 16 && !(priv->dispdev->fb_desc[fb_num].caps & RCAR_FBCAPS_32BIT))
++			  return -ENOTSUPP;
++
++		  du_set_plane_mode_planeconfig( fb_num, priv, &config );
++
++		  priv->planeconfig[fb_num] = config;
++
++		  return 0;
++
++	case CARE1_PLANE_SET_BUFFER:
++		  if(copy_from_user(&config, (CarE1PlaneConfig*)arg, sizeof(CarE1PlaneConfig))!=0)
++			  return -EFAULT;
++
++		  du_update_displaystart( fb_num, priv, &config );
++
++		  priv->planeconfig[fb_num] = config;
++
++		  return 0;
++
++	default:
++		break;
++	}
++
++	return -ENOIOCTLCMD;
++}
++
+ static struct fb_ops rcar_du_ops = {
+ 	.owner          = THIS_MODULE,
+ 	.fb_check_var	= rcar_du_check_var,
+@@ -664,6 +821,7 @@ static struct fb_ops rcar_du_ops = {
+ 	.fb_copyarea	= sys_copyarea,
+ 	.fb_imageblit	= sys_imageblit,
+ 	.fb_pan_display = rcar_du_pan_display,
++	.fb_ioctl       = rcar_ioctl
+ };
+ 
+ #ifdef CONFIG_PM
+@@ -693,6 +851,7 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 	int error;
+ 	void *buf;
+ 	int i;
++	int cpg_du_st, cpg_du_mask;
+ 
+ 	if (!pdev->dev.platform_data) {
+ 		dev_err(&pdev->dev, "no platform data defined\n");
+@@ -729,86 +888,137 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 		reso_info++;
+ 	}
+ 
+-	info = framebuffer_alloc(0, &pdev->dev);
+-	if (!info) {
+-		dev_err(&pdev->dev, "unable to allocate fb_info\n");
+-		error = -ENOMEM;
+-		goto err1;
+-	}
+-
+ 	priv->duclk = clk_get(&pdev->dev, "du_clk");
+ 	priv->clock_info = clk_get_rate(priv->duclk);
+-	priv->info = info;
+-	info->fbops = &rcar_du_ops;
+ 
+-	/* setting resolution parameter  */
+ #if defined(CONFIG_SUPPORT_LCD_PANNEL)
+ 	/* LCD Pannel BackLight ON */
+ 	writel(0x01, IO_ADDRESS(SILVERSTONE_BASE_FPGA + 0x400));
+-	/* Fix Resolution WVGA */
+-	info->var.xres = priv->res.sx =
+-		priv->dispdev->disp_par[MODE_WVGA].xres;
+-	info->var.yres = priv->res.sy =
+-		priv->dispdev->disp_par[MODE_WVGA].yres;
+-#else
+-	info->var.xres = priv->res.sx =
+-		priv->dispdev->disp_par[DEFAULT_MODE].xres;
+-	info->var.yres = priv->res.sy =
+-		priv->dispdev->disp_par[DEFAULT_MODE].yres;
+ #endif
+ 
+-	/* setting pixel format */
+-	info->var.bits_per_pixel = priv->bit_per_pixel = DEFAULT_BITPARPIXEL;
++	cpg_du_st = readl(IO_ADDRESS(RC_BASE_CPG + 0x34));
++	cpg_du_mask = (cpg_du_st & 0x08);
+ 
+-	info->var.width = -1;
+-	info->var.height = -1;
+-	info->var.activate = FB_ACTIVATE_NOW;
++	/* Request DU Clock Operation */
++	writel((cpg_du_st & 0xFFFFFFF7), IO_ADDRESS(RC_BASE_CPG + 0x34));
+ 
+-	if (mode_option)
+-		fb_find_mode(&info->var, info, mode_option,
+-			 rcarfb_modedb, ARRAY_SIZE(rcarfb_modedb), NULL, 8);
++	for (i=0; i<priv->dispdev->fb_num; i++) {
++		info = framebuffer_alloc(0, &pdev->dev);
++		if (!info) {
++			dev_err(&pdev->dev, "unable to allocate fb_info\n");
++			error = -ENOMEM;
++			goto err1;
++		}
+ 
+-	info->var.xres_virtual = info->var.xres;
+-	info->var.yres_virtual = info->var.yres * 2; /* for double buffer */
++		priv->info[i] = info;
++		info->par = priv;
++		info->fbops = &rcar_du_ops;
+ 
+-	error = rcar_du_check_var(&info->var, info);
+-	if (error)
+-		goto err1;
++		/* setting resolution parameter  */
++		if (mode_option) {
++			fb_find_mode(&info->var, info, mode_option,
++				     rcarfb_modedb, ARRAY_SIZE(rcarfb_modedb), NULL, 8);
++		} else {
++			info->var.xres = priv->res.sx =
++				priv->dispdev->disp_par[DEFAULT_MODE].xres;
++			info->var.yres = priv->res.sy =
++				priv->dispdev->disp_par[DEFAULT_MODE].yres;
++		}
+ 
+-	info->fix = rcar_du_fix;
+-	info->fix.line_length = info->var.xres *
+-			(info->var.bits_per_pixel / 8);
+-	info->fix.smem_len = MAX_XRES * MAX_YRES * FB_BYTES * PLANE_NUM;
++		info->var.xres_virtual = info->var.xres;
++		info->var.yres_virtual = info->var.yres * 2; /* for double buffer */
+ 
+-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
++		/* setting pixel format */
++		if (priv->dispdev->fb_desc[i].caps & RCAR_FBCAPS_32BIT)
++			info->var.bits_per_pixel = DEFAULT_BITPARPIXEL_32;
++		else
++			info->var.bits_per_pixel = DEFAULT_BITPARPIXEL_16;
+ 
+-	buf = dma_alloc_coherent(&pdev->dev, info->fix.smem_len,
+-				 &priv->dma_handle, GFP_KERNEL);
+-	if (!buf) {
+-		dev_err(&pdev->dev, "unable to allocate buffer\n");
+-		error = -ENOMEM;
+-		goto err1;
+-	}
++		info->var.width = -1;
++		info->var.height = -1;
++		info->var.activate = FB_ACTIVATE_NOW;
+ 
+-	info->pseudo_palette = &priv->pseudo_palette;
+-	info->flags = FBINFO_FLAG_DEFAULT;
++		info->fix = rcar_du_fix;
++
++		/* Write plane index into id string (TODO: maybe find better way to distinguish later on) */
++		info->fix.id[15] = '0' + i;
++
++		error = rcar_du_check_var(&info->var, info);
++		if (error)
++			goto err1;
++
++		info->fix.line_length = info->var.xres *
++				(info->var.bits_per_pixel / 8);
++
++		if (!priv->dispdev->fb_desc[i].fb_size) {
++			if (priv->dispdev->fb_desc[i].caps & RCAR_FBCAPS_32BIT)
++				priv->dispdev->fb_desc[i].fb_size = 4 * MAX_XRES * MAX_YRES * PLANE_NUM;
++			else
++				priv->dispdev->fb_desc[i].fb_size = 2 * MAX_XRES * MAX_YRES * PLANE_NUM;
++		}
++
++		info->fix.smem_len = priv->dispdev->fb_desc[i].fb_size;
++
++		pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
++
++		buf = dma_alloc_coherent(&pdev->dev, info->fix.smem_len,
++					 &priv->dma_handle, GFP_KERNEL);
++		if (!buf) {
++			dev_err(&pdev->dev, "unable to allocate buffer\n");
++			error = -ENOMEM;
++			goto err1;
++		}
++
++		info->pseudo_palette = &priv->pseudo_palette;
++		info->flags = FBINFO_FLAG_DEFAULT;
++
++		error = fb_alloc_cmap(&info->cmap, PALETTE_NR, 0);
++		if (error < 0) {
++			dev_err(&pdev->dev, "unable to allocate cmap\n");
++			dma_free_coherent(&pdev->dev, info->fix.smem_len,
++					  buf, priv->dma_handle);
++			goto err1;
++		}
++
++		memset(buf, 0, info->fix.smem_len);
++		info->fix.smem_start = priv->dma_handle;
++		info->screen_base = buf;
++		info->device = &pdev->dev;
++
++		if (error)
++			goto err1;
++
++		 /* allocate and fill advanced planeconfig struct, used by directfb and the ioctl interface */
++		 priv->planeconfig[i].width = info->var.xres;
++		 priv->planeconfig[i].height = info->var.yres;
++		 priv->planeconfig[i].depth = info->var.bits_per_pixel;
++		 priv->planeconfig[i].x = 0;
++		 priv->planeconfig[i].y = 0;
++		 priv->planeconfig[i].pitch = info->fix.line_length;
++		 priv->planeconfig[i].phys = info->fix.smem_start + info->var.yoffset * info->fix.line_length + info->var.xoffset * (info->var.bits_per_pixel/8);
++
++
++
++		error = register_framebuffer(info);
++		if (error < 0)
++			goto err1;
++
++		dev_info(info->dev,
++			 "registered %s/%s as %dx%d %dbpp.\n",
++			 pdev->name,
++			 "display unit",
++			 (int) info->var.xres,
++			 (int) info->var.yres,
++			 info->var.bits_per_pixel);
+ 
+-	error = fb_alloc_cmap(&info->cmap, PALETTE_NR, 0);
+-	if (error < 0) {
+-		dev_err(&pdev->dev, "unable to allocate cmap\n");
+-		dma_free_coherent(&pdev->dev, info->fix.smem_len,
+-				  buf, priv->dma_handle);
+-		goto err1;
+ 	}
+ 
+-	memset(buf, 0, info->fix.smem_len);
+-	info->fix.smem_start = priv->dma_handle;
+-	info->screen_base = buf;
+-	info->device = &pdev->dev;
+-	info->par = priv;
++	du_write(priv, DSYSR, (du_read(priv, DSYSR) & ~0x100) | 0x200 );
+ 
+-	if (error)
+-		goto err1;
++	for (i=0; i<priv->dispdev->fb_num; i++) {
++		/* plane setting */
++		du_set_plane_mode_planeconfig( i, priv, &priv->planeconfig[i] );
++	}
+ 
+ 	error = rcar_du_start(priv);
+ 	if (error) {
+@@ -816,18 +1026,6 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 		goto err1;
+ 	}
+ 
+-	error = register_framebuffer(info);
+-	if (error < 0)
+-		goto err1;
+-
+-	dev_info(info->dev,
+-		 "registered %s/%s as %dx%d %dbpp.\n",
+-		 pdev->name,
+-		 "display unit",
+-		 (int) info->var.xres,
+-		 (int) info->var.yres,
+-		 info->var.bits_per_pixel);
+-
+ 	return 0;
+ err1:
+ 	rcar_du_remove(pdev);
+@@ -837,21 +1035,25 @@ err1:
+ 
+ static int rcar_du_remove(struct platform_device *pdev)
+ {
++	int i;
+ 	struct rcar_du_priv *priv = platform_get_drvdata(pdev);
+-	struct fb_info *info = priv->info;
+ 
+-	unregister_framebuffer(info);
++	for (i=priv->dispdev->fb_num-1; i>=0; i--) {
++		struct fb_info *info = priv->info[i];
++
++		unregister_framebuffer(info);
++
++		dma_free_coherent(&pdev->dev, info->fix.smem_len,
++				  info->screen_base, priv->dma_handle);
++		fb_dealloc_cmap(&info->cmap);
++		framebuffer_release(info);
++	}
+ 
+ 	/* Interrupt VBK2 Disable */
+ 	du_write(priv, D2IER, 0);
+ 
+ 	rcar_du_stop(priv);
+ 
+-	dma_free_coherent(&pdev->dev, info->fix.smem_len,
+-			  info->screen_base, priv->dma_handle);
+-	fb_dealloc_cmap(&info->cmap);
+-	framebuffer_release(info);
+-
+ 	if (priv->base)
+ 		iounmap(priv->base);
+ 
+@@ -861,6 +1063,7 @@ static int rcar_du_remove(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
++
+ static struct platform_driver rcar_du_driver = {
+ 	.driver		= {
+ 		.name		= DEV_NAME,
+diff --git a/include/video/rcarfb.h b/include/video/rcarfb.h
+index 8a943b4..294c714 100644
+--- a/include/video/rcarfb.h
++++ b/include/video/rcarfb.h
+@@ -22,6 +22,7 @@
+ #include <linux/fb.h>
+ 
+ #define RESOLUTION_NUM	7
++#define RCAR_FB_MAX      8
+ 
+ struct rcar_disp_info {
+ 	unsigned long	dot_clock;
+@@ -38,8 +39,25 @@ struct rcar_disp_info {
+ 	unsigned long	vc;
+ };
+ 
++enum rcar_fb_caps {
++	RCAR_FBCAPS_NONE	= 0x00,
++	RCAR_FBCAPS_32BIT	= 0x01,
++	RCAR_FBCAPS_ALL	= 0x01,
++};
++
++struct rcar_fb_desc {
++	enum rcar_fb_caps	caps;
++
++     unsigned int        fb_size;
++
++	int				index1;
++	int				index2;
++};
++
+ struct rcar_reso_info {
+-	struct rcar_disp_info disp_par[RESOLUTION_NUM];
++	struct rcar_disp_info    disp_par[RESOLUTION_NUM];
++     struct rcar_fb_desc      fb_desc[RCAR_FB_MAX];
++     unsigned int             fb_num;
+ };
+ 
+ 
+@@ -49,7 +67,8 @@ struct rcar_reso_info {
+ #define BITPARPIXEL_16	16
+ #define BITPARPIXEL_24	24
+ #define BITPARPIXEL_32	32
+-#define DEFAULT_BITPARPIXEL	BITPARPIXEL_16
++#define DEFAULT_BITPARPIXEL_16	BITPARPIXEL_16
++#define DEFAULT_BITPARPIXEL_32	BITPARPIXEL_32
+ #define BYTEPIXEL	8
+ 
+ #define	MODE_VGA	0	/* 640x480 */
+@@ -60,7 +79,7 @@ struct rcar_reso_info {
+ #define	MODE_WXGA	5	/* 1280x768 */
+ #define	MODE_WXGA2	6	/* 1280x720 */
+ #define MODE_ERROR	-1	/* error size */
+-#define DEFAULT_MODE	MODE_VGA
++#define DEFAULT_MODE	MODE_XGA
+ 
+ #define XRES_VGA	640
+ #define XRES_SVGA	800
+@@ -360,6 +379,8 @@ struct rcar_reso_info {
+ #define MASK_PRIL	0xffffff00
+ 
+ /* Display plane register offset definitions */
++#define PnMR(n)		(0x00100 + 0x100 * (n)) /* plane n */
++
+ #define P1MR		0x00100 /* plane 1 */
+ #define PnDDDF_8BPP_PnMR	(0<<0)	/* 8bit */
+ #define PnDDDF_16BPP_PnMR	(1<<0)	/* 16bit */
+@@ -392,6 +413,8 @@ struct rcar_reso_info {
+ #define MODE_RGB_PnMR		(PnDDDF_ARGB_PnMR | PnBM_MD_PnMR | \
+ 				 PnSPIM_TPOFF_PnMR)
+ 
++#define PnMWR(n)	(0x00104 + 0x100 * (n)) /* plane n */
++
+ #define P1MWR		0x00104
+ 
+ #define P1ALPHAR	0x00108
+@@ -435,6 +458,8 @@ struct rcar_reso_info {
+ 
+ #define P1SWAPR		0x00180
+ 
++#define PnDDCR(n)	(0x00184 + 0x100 * (n)) /* plane n */
++
+ #define P1DDCR		0x00184
+ #define CODE_DDCR	(0x7775<<16)
+ #define PnLRGB1_DDCR	(1<<11)
+@@ -725,14 +750,32 @@ struct rcar_reso_info {
+ #define DU0_SINGLE_DORCR	(0)
+ 
+ #define DPTSR		0x11004
++#define DPTSR_P8DK	(0x01 << 23)
++#define DPTSR_P7DK	(0x01 << 22)
++#define DPTSR_P6DK	(0x01 << 21)
++#define DPTSR_P5DK	(0x01 << 20)
++#define DPTSR_P4DK	(0x01 << 19)
++#define DPTSR_P3DK	(0x01 << 18)
+ #define DPTSR_P2DK	(0x01 << 17)
+ #define DPTSR_P1DK	(0x01 << 16)
++#define DPTSR_P8TS	(0x01 << 7)
++#define DPTSR_P7TS	(0x01 << 6)
++#define DPTSR_P6TS	(0x01 << 5)
++#define DPTSR_P5TS	(0x01 << 4)
++#define DPTSR_P4TS	(0x01 << 3)
++#define DPTSR_P3TS	(0x01 << 2)
+ #define DPTSR_P2TS	(0x01 << 1)
+ #define DPTSR_P1TS	(0x01 << 0)
+ 
+ #define DAPTSR		0x11008
+ #define DS1PR		0x11020
+ #define DS2PR		0x11024
++#define S2S8_8		(0x08 << 28)
++#define S2S7_7		(0x07 << 24)
++#define S2S6_6		(0x06 << 20)
++#define S2S5_5		(0x05 << 16)
++#define S2S4_4		(0x04 << 12)
++#define S2S3_3		(0x03 << 8)
+ #define S2S2_2		(0x02 << 4)
+ #define S2S1_1		(0x01 << 0)
+ 
+@@ -746,4 +789,33 @@ struct rcar_reso_info {
+ #define GCBCR		0x11098
+ #define BCBCR		0x1109c
+ 
++
++
++typedef enum {
++     CARE1_PLANE_DISABLED     = 0x00000001,
++     CARE1_PLANE_ALPHACHANNEL = 0x00000002,
++     CARE1_PLANE_OPACITY      = 0x00000004,
++} CarE1PlaneOptions;
++
++typedef struct {
++     CarE1PlaneOptions   options;
++
++     unsigned long       phys;
++     int                 pitch;
++     int                 depth;
++
++     int                 x;
++     int                 y;
++     int                 width;
++     int                 height;
++
++     int                 opacity;
++} CarE1PlaneConfig;
++
++
++#define CARE1_PLANE_GET_DESCRIPTION     _IOR ( 0xE1, 1, struct rcar_fb_desc )
++#define CARE1_PLANE_SET_CONFIG          _IOWR( 0xE1, 2, CarE1PlaneConfig )
++#define CARE1_PLANE_SET_BUFFER          _IOWR( 0xE1, 3, CarE1PlaneConfig )
++
++
+ #endif /* __ASM_RCARFB_H__ */
+-- 
+1.7.0.4
+
