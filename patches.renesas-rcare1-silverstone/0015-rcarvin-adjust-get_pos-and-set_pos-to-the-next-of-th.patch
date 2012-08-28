@@ -1,0 +1,41 @@
+From 266550ce5c5468de0680c7017db291ebf85e9e52 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Fri, 18 May 2012 18:24:04 +0900
+Subject: [PATCH 15/80] rcarvin: adjust get_pos and set_pos to the next of the last terminated position
+
+The continuous capturing must be restarted at the next of the last
+terminated buffer, not the first buffer. So get_pos and set_pos should
+be adjusted according to status of the last termination.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 651015c..9792485 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -719,6 +719,7 @@ static int rcar_vin_add_device(struct soc_camera_device *icd)
+ 	struct soc_camera_host *ici = to_soc_camera_host(icd->dev.parent);
+ 	struct rcar_vin_dev *pcdev = ici->priv;
+ 	int ret;
++	u32 ms_fbs;
+ 
+ 	if (pcdev->icd)
+ 		return -EBUSY;
+@@ -731,6 +732,11 @@ static int rcar_vin_add_device(struct soc_camera_device *icd)
+ 	pm_runtime_get_sync(ici->v4l2_dev.dev);
+ #endif /* CONFIG_PM */
+ 
++	/* adjust get_pos and set_pos
++	   to the next of the last terminated position. */
++	ms_fbs = (vin_get_status(pcdev) & MB_MASK) >> 3;
++	pcdev->set_pos = pcdev->get_pos = (ms_fbs >= 2) ? 0 : ms_fbs + 1;
++
+ 	ret = rcar_vin_soft_reset(pcdev);
+ 	if (!ret)
+ 		pcdev->icd = icd;
+-- 
+1.7.0.4
+
