@@ -1,0 +1,263 @@
+From 045fad0cbc3efbd15ad50381659ea4e2a1ed8bf3 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Tue, 14 Aug 2012 18:38:55 +0900
+Subject: [PATCH 67/80] Revert "video: rcarfb: Fix display panning"
+
+This reverts commit 4637f31ee10f9fc3a263ffd167617a98f9429b3f.
+
+Conflicts:
+
+	drivers/video/rcarfb.c
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ arch/arm/mach-rcar/board-silverstone.c |    1 -
+ drivers/video/rcarfb.c                 |  100 ++++++++------------------------
+ include/video/rcarfb.h                 |    4 -
+ 3 files changed, 25 insertions(+), 80 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index b31bedc..6cd7158 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -607,7 +607,6 @@ static struct rcar_reso_info rcar_reso_par = {
+ 		.vder = 795,
+ 		.vsp  = 809,
+ 	},
+-	.du_channel = DU_CH1,
+ };
+ 
+ static struct resource rcar_du_resources[] = {
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index 0946e79..36136f5 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -85,8 +85,6 @@ struct rcar_du_priv {
+ 	struct clk	*duclk;
+ 	int		clock_info;
+ 	struct rcar_reso_info *dispdev;
+-	wait_queue_head_t vsync_wait;
+-	int		vsync_flag;
+ };
+ 
+ static struct fb_fix_screeninfo rcar_du_fix  = {
+@@ -95,7 +93,7 @@ static struct fb_fix_screeninfo rcar_du_fix  = {
+ 	.visual =	FB_VISUAL_TRUECOLOR,
+ 	.accel =	FB_ACCEL_NONE,
+ 	.xpanstep =	0,
+-	.ypanstep =	0,
++	.ypanstep =	1,
+ 	.ywrapstep =	0,
+ 	.smem_start =	0,
+ };
+@@ -221,8 +219,8 @@ static void du_set_plane(struct rcar_du_priv *priv, unsigned long plane_no)
+ 	du_write(priv, P1DSYR + (plane_no * PLANE_OFF), disp.sy);
+ 	du_write(priv, P1DPXR + (plane_no * PLANE_OFF), moni.px);
+ 	du_write(priv, P1DPYR + (plane_no * PLANE_OFF), moni.py);
+-	du_write(priv, P1DSA0R + (plane_no * PLANE_OFF),
+-		 pl->disp_area0_base);
++	du_write(priv, P1DSA0R + (plane_no * PLANE_OFF), pl->disp_area0_base);
++	du_write(priv, P1DSA1R + (plane_no * PLANE_OFF), pl->disp_area1_base);
+ 	du_write(priv, P1SPXR + (plane_no * PLANE_OFF), mem.px);
+ 	du_write(priv, P1SPYR + (plane_no * PLANE_OFF), mem.py);
+ 	du_write(priv, P1WASPR + (plane_no * PLANE_OFF), pl->waspr);
+@@ -281,21 +279,9 @@ static irqreturn_t rcar_du_irq(int irq, void *data)
+ 	intr1 &= DU1_INT_ALL;
+ 	intr2 &= DU2_INT_ALL;
+ 
+-	if (intr1) {
+-		/* clear interrupt */
+-		du_write(priv, DSRCR, intr1);
+-
+-		priv->vsync_flag = DU_CH0;
+-		wake_up_interruptible(&priv->vsync_wait);
+-	}
+-
+-	if (intr2) {
+-		/* clear interrupt */
+-		du_write(priv, D2SRCR, intr2);
+-
+-		priv->vsync_flag = DU_CH1;
+-		wake_up_interruptible(&priv->vsync_wait);
+-	}
++	/* clear interrupt */
++	du_write(priv, DSRCR, intr1);
++	du_write(priv, D2SRCR, intr2);
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -408,8 +394,6 @@ static int rcar_du_start(struct rcar_du_priv *priv)
+ 	/* plane setting */
+ 	du_set_plane_mode(priv, info, priv->plane_area);
+ 
+-	/* Interrupt VBK2 clear */
+-	du_write(priv, D2SRCR, VBK2_D2SSR);
+ 	/* Interrupt VBK2 Enable */
+ 	du_write(priv, D2IER, VBK2_D2SSR);
+ 
+@@ -490,22 +474,26 @@ static int rcar_du_pan_display(struct fb_var_screeninfo *var,
+ {
+ 	struct rcar_du_priv *priv = info->par;
+ 
+-	unsigned long plane_no = priv->plane_area;
++	unsigned long tmp;
+ 
+ 	if (var->xoffset != priv->offset.sx ||
+ 		 var->yoffset != priv->offset.sy) {
+-		if ((var->xoffset == 0) && (var->yoffset == 0)) {
+-			du_write(priv, P1DSA0R + (plane_no * PLANE_OFF),
+-				 priv->plane[plane_no].disp_area0_base);
+-		} else if (var->yoffset == info->var.yres) {
+-			du_write(priv, P1DSA0R + (plane_no * PLANE_OFF),
+-				 priv->plane[plane_no].disp_area1_base);
++		if ((var->xoffset == 0) && ((var->yoffset == 0) ||
++			 (var->yoffset == info->var.yres))) {
++			/* display the area0 */
++			priv->offset.sx = var->xoffset;
++			priv->offset.sy = var->yoffset;
+ 		} else {
+ 			return -EINVAL;
+ 		}
+-		/* display the area0 */
+-		priv->offset.sx = var->xoffset;
+-		priv->offset.sy = var->yoffset;
++		/* Change frame buffer */
++		tmp = du_read(priv, P1MR);
++		du_write(priv, P1MR, PnDC_ON_PnMR | tmp);
++	}
++
++	while (1) {
++		if ((du_read(priv, D2SSR) & VBK2_D2SSR) == VBK2_D2SSR)
++			break;
+ 	}
+ 
+ 	return 0;
+@@ -567,8 +555,6 @@ static int rcar_du_set_par(struct fb_info *info)
+ 		/* update param */
+ 		priv->res.sx = var->xres;
+ 		priv->res.sy = var->yres;
+-
+-		info->fix.ypanstep = var->yres;
+ 	}
+ 
+ 	/* check the BPP */
+@@ -604,52 +590,18 @@ err1:
+ 	return ret;
+ }
+ 
+-static int rcar_du_wait_for_vsync(struct fb_info *info)
+-{
+-	struct rcar_du_priv *priv = info->par;
+-	int ret;
+-
+-	priv->vsync_flag = -1;
+-	ret = wait_event_interruptible_timeout(priv->vsync_wait,
+-			priv->vsync_flag == priv->dispdev->du_channel,
+-			msecs_to_jiffies(100));
+-
+-	if (!ret)
+-		return -ETIMEDOUT;
+-
+-	return 0;
+-}
+-
+-static int rcar_du_ioctl(struct fb_info *info, unsigned int cmd,
+-			 unsigned long arg)
+-{
+-	int retval;
+-
+-	switch (cmd) {
+-	case FBIO_WAITFORVSYNC:
+-		retval = rcar_du_wait_for_vsync(info);
+-		break;
+-
+-	default:
+-		retval = -ENOIOCTLCMD;
+-		break;
+-	}
+-	return retval;
+-}
+-
+ static struct fb_ops rcar_du_ops = {
+ 	.owner          = THIS_MODULE,
+ 	.fb_check_var	= rcar_du_check_var,
+-	.fb_set_par	= rcar_du_set_par,
++	.fb_set_par		= rcar_du_set_par,
+ 	.fb_setcolreg	= rcar_du_setcolreg,
+-	.fb_blank	= rcar_du_blank,
++	.fb_blank		= rcar_du_blank,
+ 	.fb_read        = fb_sys_read,
+ 	.fb_write       = fb_sys_write,
+ 	.fb_fillrect	= sys_fillrect,
+ 	.fb_copyarea	= sys_copyarea,
+ 	.fb_imageblit	= sys_imageblit,
+ 	.fb_pan_display = rcar_du_pan_display,
+-	.fb_ioctl	= rcar_du_ioctl,
+ };
+ 
+ #ifdef CONFIG_PM
+@@ -673,6 +625,8 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ {
+ 	struct fb_info *info;
+ 	struct rcar_du_priv *priv;
++	struct rcar_reso_info *reso_info;
++
+ 	struct resource *res;
+ 	int error;
+ 	void *buf;
+@@ -698,8 +652,6 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, priv);
+ 
+-	init_waitqueue_head(&priv->vsync_wait);
+-
+ 	error = request_irq(i, rcar_du_irq, IRQF_DISABLED,
+ 			    dev_name(&pdev->dev), priv);
+ 	if (error) {
+@@ -710,7 +662,7 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 	priv->plane_area = DISP_PLANE_NUM;
+ 	priv->irq = i;
+ 	priv->base = ioremap_nocache(res->start, (res->end - res->start) + 1);
+-	priv->dispdev = pdev->dev.platform_data;
++	priv->dispdev = reso_info = pdev->dev.platform_data;
+ 
+ 	info = framebuffer_alloc(0, &pdev->dev);
+ 	if (!info) {
+@@ -761,7 +713,6 @@ static int __devinit rcar_du_probe(struct platform_device *pdev)
+ 	info->fix = rcar_du_fix;
+ 	info->fix.line_length = info->var.xres *
+ 			(info->var.bits_per_pixel / 8);
+-	info->fix.ypanstep = info->var.yres;
+ 	info->fix.smem_len = MAX_XRES * MAX_YRES * FB_BYTES * PLANE_NUM;
+ 
+ 	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
+@@ -882,4 +833,3 @@ module_exit(rcar_du_exit);
+ 
+ MODULE_DESCRIPTION("R-Car M1A Display Unit Framebuffer driver");
+ MODULE_LICENSE("GPL v2");
+-
+diff --git a/include/video/rcarfb.h b/include/video/rcarfb.h
+index fae0c9c..e661266 100644
+--- a/include/video/rcarfb.h
++++ b/include/video/rcarfb.h
+@@ -40,7 +40,6 @@ struct rcar_disp_info {
+ 
+ struct rcar_reso_info {
+ 	struct rcar_disp_info disp_par[RESOLUTION_NUM];
+-	int du_channel;
+ };
+ 
+ #define DISP_PLANE1	0
+@@ -53,9 +52,6 @@ struct rcar_reso_info {
+ #define DISP_PLANE8	7
+ #define DISP_PLANE_NUM	DISP_PLANE1
+ 
+-#define DU_CH0 0
+-#define DU_CH1 1
+-
+ #define RCARFB_SUPPORTBLANK	0
+ 
+ #define BITPARPIXEL_8	8
+-- 
+1.7.0.4
+
