@@ -1,0 +1,48 @@
+From 3d506b390cd889c39662184867b4de45966b01d9 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 20 Jun 2012 14:52:32 +0900
+Subject: [PATCH 49/80] rcarvin: exclude unknown mediabus formats
+
+This removes the function 'rcar_vin_packing_supported()' which
+decides whether unknown mediabus formats should be supported
+according to its packing type.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |   13 +------------
+ 1 files changed, 1 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 1848dd3..3c7ffb5 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -1092,16 +1092,6 @@ static const struct soc_mbus_pixelfmt rcar_vin_formats[] = {
+ 	},
+ };
+ 
+-/* This will be corrected as we get more formats */
+-static bool rcar_vin_packing_supported(const struct soc_mbus_pixelfmt *fmt)
+-{
+-	return	fmt->packing == SOC_MBUS_PACKING_NONE ||
+-		(fmt->bits_per_sample == 8 &&
+-		 fmt->packing == SOC_MBUS_PACKING_2X8_PADHI) ||
+-		(fmt->bits_per_sample > 8 &&
+-		 fmt->packing == SOC_MBUS_PACKING_EXTEND16);
+-}
+-
+ static int client_g_rect(struct v4l2_subdev *sd, struct v4l2_rect *rect);
+ 
+ static int rcar_vin_get_formats(struct soc_camera_device *icd, unsigned int idx,
+@@ -1230,8 +1220,7 @@ static int rcar_vin_get_formats(struct soc_camera_device *icd, unsigned int idx,
+ 		}
+ 		break;
+ 	default:
+-		if (!rcar_vin_packing_supported(fmt))
+-			return 0;
++		return 0;
+ 	}
+ 
+ 	return formats;
+-- 
+1.7.0.4
+
