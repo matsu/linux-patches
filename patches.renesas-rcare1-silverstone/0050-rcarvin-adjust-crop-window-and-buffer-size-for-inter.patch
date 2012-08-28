@@ -1,0 +1,65 @@
+From 58d89de9295960742c4ee0441f127c2f0760a54d Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 20 Jun 2012 16:41:18 +0900
+Subject: [PATCH 50/80] rcarvin: adjust crop window and buffer size for interlaced video with odd number of lines
+
+In interlaced video with odd number of lines, top field must have
+one more line than even field. So crop window should be adjusted
+for the bigger field. As a result of the adjustment, buffer size
+should be also adjusted since a combined image may have one dummy line.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |   15 ++++++++++-----
+ 1 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 3c7ffb5..9058ef3 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -274,7 +274,7 @@ static int rcar_vin_videobuf_setup(struct videobuf_queue *vq,
+ 	struct rcar_vin_dev *pcdev = ici->priv;
+ 	int bytes_per_line = soc_mbus_bytes_per_line(icd->user_width,
+ 						icd->current_fmt->host_fmt);
+-	unsigned int align;
++	unsigned int align, lines;
+ 
+ 	if (bytes_per_line < 0)
+ 		return bytes_per_line;
+@@ -283,7 +283,12 @@ static int rcar_vin_videobuf_setup(struct videobuf_queue *vq,
+ 	   for each buffer and plane. */
+ 	align = (icd->current_fmt->host_fmt->
+ 		 fourcc == V4L2_PIX_FMT_NV16) ? 0xff : 0x7f;
+-	*size = ((bytes_per_line * icd->user_height) + align) & ~align;
++	lines = icd->user_height;
++	if (((pcdev->field == V4L2_FIELD_INTERLACED) ||
++	     (pcdev->field == V4L2_FIELD_INTERLACED_TB) ||
++	     (pcdev->field == V4L2_FIELD_INTERLACED_BT)) && (lines & 0x01))
++		lines += 1;
++	*size = ((bytes_per_line * lines) + align) & ~align;
+ 
+ 	if (0 == *count)
+ 		*count = 2;
+@@ -905,8 +910,8 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 	if ((pcdev->field == V4L2_FIELD_INTERLACED) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_TB) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_BT)) {
+-		vin_write(pcdev, V0SLPrC, top_offset / 2);
+-		vin_write(pcdev, V0ELPrC, (top_offset + cam->height) / 2 - 1);
++		vin_write(pcdev, V0SLPrC, (top_offset + 1) / 2);
++		vin_write(pcdev, V0ELPrC, (top_offset + cam->height + 1) / 2 - 1);
+ 	} else {
+ 		vin_write(pcdev, V0SLPrC, top_offset);
+ 		vin_write(pcdev, V0ELPrC, top_offset + cam->height - 1);
+@@ -923,7 +928,7 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 	if ((pcdev->field == V4L2_FIELD_INTERLACED) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_TB) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_BT))
+-		vin_write(pcdev, V0ELPoC, cam_subrect->height / 2 - 1);
++		vin_write(pcdev, V0ELPoC, (cam_subrect->height + 1) / 2 - 1);
+ 	else
+ 		vin_write(pcdev, V0ELPoC, cam_subrect->height - 1);
+ 
+-- 
+1.7.0.4
+
