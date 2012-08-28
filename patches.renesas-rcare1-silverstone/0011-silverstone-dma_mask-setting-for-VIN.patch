@@ -1,0 +1,36 @@
+From 305db93ba87921d30f8568f3b10b2cd1cd747f29 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 10 May 2012 11:19:01 +0900
+Subject: [PATCH 11/80] silverstone: dma_mask setting for VIN
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ arch/arm/mach-rcar/board-silverstone.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index aec6c0a..b31bedc 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -653,13 +653,17 @@ static struct rcar_vin_info rcar_vin0_info = {
+ 	.flags = RCAR_VIN_FLAG_USE_8BIT_BUS,
+ };
+ 
++static u64 rcarvin_dmamask = DMA_BIT_MASK(32);
++
+ static struct platform_device rcar_vin0_device = {
+ 	.name  = "rcar_vin",
+ 	.id             = 0,
+ 	.num_resources = ARRAY_SIZE(rcar_vin0_resources),
+ 	.resource  = rcar_vin0_resources,
+ 	.dev  = {
++		.dma_mask = &rcarvin_dmamask,
+ 		.platform_data = &rcar_vin0_info,
++		.coherent_dma_mask = DMA_BIT_MASK(32),
+ 	},
+ };
+ 
+-- 
+1.7.0.4
+
