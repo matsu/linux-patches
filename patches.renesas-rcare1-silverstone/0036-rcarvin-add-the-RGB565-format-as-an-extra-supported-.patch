@@ -1,0 +1,34 @@
+From b47814d18e8d726caba4189691fd4ba50bc43b08 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Tue, 12 Jun 2012 14:04:54 +0900
+Subject: [PATCH 36/80] rcarvin: add the RGB565 format as an extra supported color
+
+VIN could convert any (accepted) input colors into RGB565.
+This adds the RGB565 format into the extra colors list.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 7aae2a6..ba48448 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -1022,6 +1022,13 @@ static const struct soc_mbus_pixelfmt rcar_vin_formats[] = {
+ 		.packing		= SOC_MBUS_PACKING_NONE,
+ 		.order			= SOC_MBUS_ORDER_LE,
+ 	},
++	{
++		.fourcc			= V4L2_PIX_FMT_RGB565,
++		.name			= "RGB565",
++		.bits_per_sample	= 16,
++		.packing		= SOC_MBUS_PACKING_NONE,
++		.order			= SOC_MBUS_ORDER_LE,
++	},
+ };
+ 
+ /* This will be corrected as we get more formats */
+-- 
+1.7.0.4
+
