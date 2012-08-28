@@ -1,0 +1,44 @@
+From 51a4521f9d74b6ff8afb6cd928632a7829248f2d Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Fri, 1 Jun 2012 14:59:22 +0900
+Subject: [PATCH 31/80] rcarvin: remove unused parameter 'is_16bit'
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |   12 ------------
+ 1 files changed, 0 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 4225dfe..10e974a 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -157,7 +157,6 @@ struct rcar_vin_dev {
+ 	enum v4l2_field field;
+ 
+ 	unsigned int image_mode:1;
+-	unsigned int is_16bit:1;
+ 
+ 	/* physical address for video capture memory */
+ 	dma_addr_t dma_handle;
+@@ -937,17 +936,6 @@ static int rcar_vin_set_bus_param(struct soc_camera_device *icd,
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	switch (common_flags & SOCAM_DATAWIDTH_MASK) {
+-	case SOCAM_DATAWIDTH_8:
+-		pcdev->is_16bit = 0;
+-		break;
+-	case SOCAM_DATAWIDTH_16:
+-		pcdev->is_16bit = 1;
+-		break;
+-	default:
+-		return -EINVAL;
+-	}
+-
+ 	value = 0;
+ 
+ 	value |= common_flags & SOCAM_VSYNC_ACTIVE_LOW ?
+-- 
+1.7.0.4
+
