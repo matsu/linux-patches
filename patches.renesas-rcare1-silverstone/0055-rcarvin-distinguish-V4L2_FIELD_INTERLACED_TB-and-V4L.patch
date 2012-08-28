@@ -1,0 +1,41 @@
+From fb063e1a2188b3eae22349a69cedf755559fc326 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Wed, 20 Jun 2012 18:24:02 +0900
+Subject: [PATCH 55/80] rcarvin: distinguish V4L2_FIELD_INTERLACED_TB and V4L2_FIELD_INTERLACED_BT
+
+Now field order for interlaced video could be specified.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index cbea6e9..7d6a4c4 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -436,7 +436,7 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		mc = VIN_VNMC_IM_FULL;
+ 		break;
+ 	case V4L2_FIELD_INTERLACED_BT:
+-		mc = VIN_VNMC_IM_FULL;
++		mc = VIN_VNMC_IM_FULL | VIN_VNMC_FOC;
+ 		break;
+ 	default:
+ 		mc = VIN_VNMC_IM_ODD;
+@@ -1714,10 +1714,10 @@ static int rcar_vin_set_fmt(struct soc_camera_device *icd,
+ 	case V4L2_FIELD_NONE:
+ 	case V4L2_FIELD_TOP:
+ 	case V4L2_FIELD_BOTTOM:
+-		field = pix->field;
+-		break;
+ 	case V4L2_FIELD_INTERLACED_TB:
+ 	case V4L2_FIELD_INTERLACED_BT:
++		field = pix->field;
++		break;
+ 	case V4L2_FIELD_INTERLACED:
+ 		field = V4L2_FIELD_INTERLACED_TB;
+ 		break;
+-- 
+1.7.0.4
+
