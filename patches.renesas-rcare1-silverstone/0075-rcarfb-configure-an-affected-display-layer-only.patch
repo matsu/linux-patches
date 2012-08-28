@@ -1,0 +1,58 @@
+From 1195af0f4938db001c2da78cc8de9c6f67812d09 Mon Sep 17 00:00:00 2001
+From: Takanari Hayama <taki@igel.co.jp>
+Date: Thu, 12 Jan 2012 09:21:15 +0900
+Subject: [PATCH 75/80] rcarfb: configure an affected display layer only.
+
+It was reconfiguring all layers everytime any of layer settings is updated.
+This could cause unexpected DS2PR value.
+
+TODO: We may also need spinlock or mutex to avoid the race condition.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/video/rcarfb.c |   21 ++++++++-------------
+ 1 files changed, 8 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index db13032..2249bb3 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -275,9 +275,6 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 
+ 	int alphamode = PnSPIM_TPOFF_PnMR;
+ 
+-	int i;
+-
+-
+      if ((planeconfig->options & CARE1_PLANE_OPACITY ) ||
+ 	    (planeconfig->options & CARE1_PLANE_ALPHACHANNEL && planeconfig->format == CARE1_FORMAT_ARGB ))
+ 		alphamode = PnSPIM_TPOFF_PnMR | PnSPIM_ALPON_PnMR;
+@@ -296,17 +293,15 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 	dshpr &= MASK_PRIL;
+ 
+ 
+-	/* reconfigure ds2pr to show only enabled planes */
+-	ds2pr = 0;
+-	for (i=0;i<priv->dispdev->fb_num;i++) {
+-		if (!(priv->planeconfig[i].options & CARE1_PLANE_DISABLED)) {
+-			ds2pr |= ((priv->dispdev->fb_desc[i].index1+1) << (4*priv->dispdev->fb_desc[i].index1));
+-			if (care1_format_to_depth (priv->planeconfig[i].format) == 32)
+-				/* enable second plane only for "32bit" */
+-				ds2pr |= ((priv->dispdev->fb_desc[i].index2+1) << (4*priv->dispdev->fb_desc[i].index2));
+-		}
++	/* configure ds2pr to show only enabled planes */
++	ds2pr = du_read(priv, DS2PR);
++	ds2pr &= ~((0xf << (index1 << 2)) | (0xf << (index2 << 2)));
++	if (!(planeconfig->options & CARE1_PLANE_DISABLED)) {
++		ds2pr |= ((index1 + 1) << (index1 << 2));
++		if (care1_format_to_depth(planeconfig->format) == 32)
++			/* enable second plane only for "32bit" */
++			ds2pr |= ((index2 + 1) << (index2 << 2));
+ 	}
+-
+ 	du_write(priv, DS2PR, ds2pr);
+ 
+ 	if (care1_format_to_depth(planeconfig->format) == 16) {
+-- 
+1.7.0.4
+
