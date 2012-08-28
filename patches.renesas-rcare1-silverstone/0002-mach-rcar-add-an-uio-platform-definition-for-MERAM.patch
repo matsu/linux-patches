@@ -1,0 +1,65 @@
+From 6238e965f00af9641567e72b71cb9b9e20e0ecfd Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Tue, 17 Jan 2012 14:26:18 +0900
+Subject: [PATCH 02/80] mach-rcar: add an uio platform definition for MERAM
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ arch/arm/mach-rcar/board-silverstone.c |   33 ++++++++++++++++++++++++++++++++
+ 1 files changed, 33 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index acdd4de..1356b19 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -79,6 +79,38 @@ static struct platform_device vpu_device = {
+     .num_resources  = ARRAY_SIZE(vpu_resources),
+ };
+ 
++/* MERAM */
++static struct uio_info meram_platform_data = {
++	.name = "MERAM",
++	.version = "0",
++	.irq = -1,
++};
++
++static struct resource meram_resources[] = {
++	[0] = {
++		.name   = "MERAM",
++		.start  = 0xfd200000,
++		.end    = 0xfd200418 + 0x020 * 128 - 1,
++		.flags  = IORESOURCE_MEM,
++	},
++	[1] = {
++		.name   = "MERAM_MEM",
++		.start  = 0xfd480000,
++		.end    = 0xfd4fffff,
++		.flags  = IORESOURCE_MEM,
++	}
++};
++
++static struct platform_device meram_device = {
++	.name           = "uio_pdrv_genirq",
++	.id             = 1,
++	.dev = {
++		.platform_data  = &meram_platform_data,
++	},
++	.resource       = meram_resources,
++	.num_resources  = ARRAY_SIZE(meram_resources),
++};
++
+ static void __init memchunk_cmdline_override( char *name, unsigned long *sizep )
+ {
+     char *p = boot_command_line;
+@@ -645,6 +677,7 @@ static struct platform_device *devs[] __initdata = {
+ 	&rcar_vin0_device,
+ 	&rcar_camera[0],
+ 	&vpu_device,
++	&meram_device,
+ 	&rcar_pmu_device,
+ };
+ 
+-- 
+1.7.0.4
+
