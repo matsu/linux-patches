@@ -1,0 +1,583 @@
+From 7a4e65350799a076153f153ad84f49a2dd8ce0c9 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 10 May 2012 11:20:28 +0900
+Subject: [PATCH 12/80] rcarvin: activate the continuous capturing mode for higher frame rate
+
+This has been implemented by RMS.
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |  389 +++++++++++++++++++++++++----------------
+ 1 files changed, 236 insertions(+), 153 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 4e442d4..47c3c25 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -113,6 +113,14 @@
+ #define NTSC_WIDTH 720
+ #define NTSC_HEIGHT 486
+ 
++#define BUF_OFF		0x04
++#define MB_NUM		3
++#define SINGLE_BUF	0
++#define MB_MASK		0x18
++#define CONT_TRANS	4
++#define FLAG_ON		1
++#define FLAG_OFF	0
++
+ #undef DEBUG_GEOMETRY
+ /*#define DEBUG_GEOMETRY*/
+ #ifdef DEBUG_GEOMETRY
+@@ -152,6 +160,17 @@ struct rcar_vin_dev {
+ 	/* virtual address for video capture memory */
+ 	void *vaddr;
+ 
++	struct videobuf_buffer *queue_buf[MB_NUM];
++	unsigned int mb_cnt;
++	unsigned int queue_cnt;
++	unsigned int vb_count;
++	unsigned int set_pos;
++	unsigned int get_pos;
++	unsigned int first_op;
++	unsigned int disable_on;
++	unsigned int wait_capture_stop;
++	struct completion capture_stop;
++
+ 	struct clk *vinclk;
+ };
+ 
+@@ -249,7 +268,7 @@ static int rcar_vin_videobuf_setup(struct videobuf_queue *vq,
+ 	if (bytes_per_line < 0)
+ 		return bytes_per_line;
+ 
+-	*size = bytes_per_line * icd->user_height;
++	*size = bytes_per_line * icd->user_height * 2;
+ 
+ 	if (0 == *count)
+ 		*count = 2;
+@@ -259,6 +278,9 @@ static int rcar_vin_videobuf_setup(struct videobuf_queue *vq,
+ 			*count = pcdev->video_limit / PAGE_ALIGN(*size);
+ 	}
+ 
++	pcdev->vb_count = *count;
++	pcdev->first_op = FLAG_OFF;
++
+ 	dev_dbg(icd->dev.parent, "count=%d, size=%d\n", *count, *size);
+ 
+ 	return 0;
+@@ -347,13 +369,10 @@ static void free_buffer(struct videobuf_queue *vq,
+ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ {
+ 	struct soc_camera_device *icd = pcdev->icd;
+-	dma_addr_t phys_addr_top;
+ 	u32 status_of_int;
+-	u32 status_of_module;
+ 	u32 field;
+ 	int ret = 0;
+ 
+-	status_of_module = vin_read(pcdev, V0MS);
+ 	status_of_int = vin_read(pcdev, V0INTS);
+ 
+ 	/* clear interrupt */
+@@ -370,82 +389,88 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		ret = -EIO;
+ 	}
+ #endif /* RCARVIN_SUPPORT_ERR_INT */
+-	if (!pcdev->active)
+-		return ret;
+ 
+ 	/* disable interrupt */
+ 	vin_write(pcdev, V0IE, 0x00000000);
+ 
+-	/* set a physical address for videocapture memory*/
+-	phys_addr_top = videobuf_to_dma_contig(pcdev->active);
+-	vin_write(pcdev, V0MB1, phys_addr_top);
+-
+-	if ((vin_read(pcdev, V0FC) & VIN_VNFC_S_FRAME) == 0) {
+-		if ((status_of_int & VIN_VNIE_MASK) == 0) {
+-			switch (pcdev->field) {
+-			case V4L2_FIELD_TOP:
+-				field = VIN_VNMC_IM_ODD;
+-				break;
+-			case V4L2_FIELD_BOTTOM:
+-				field = VIN_VNMC_IM_EVEN;
+-				break;
+-			case V4L2_FIELD_INTERLACED:
+-			case V4L2_FIELD_INTERLACED_TB:
+-				field = VIN_VNMC_IM_FULL;
+-				break;
+-			case V4L2_FIELD_INTERLACED_BT:
+-				field = VIN_VNMC_IM_FULL;
+-				break;
+-			default:
+-				field = VIN_VNMC_IM_ODD;
+-				break;
+-			}
+-			vin_write(pcdev, V0MC,
+-			(vin_read(pcdev, V0MC) & ~VIN_VNMC_FIELD_MASK) | field);
+-		}
+-
+-		/* start capture */
+-		switch (icd->current_fmt->host_fmt->fourcc) {
+-		case V4L2_PIX_FMT_NV16:
+-		case V4L2_PIX_FMT_YUYV:
+-			vin_write(pcdev, V0DMR,
+-				vin_read(pcdev, V0DMR) | VIN_VNDMR_BPSM);
+-			vin_write(pcdev, V0MC,
+-				vin_read(pcdev, V0MC) |
+-				VIN_VNMC_ME | VIN_VNMC_BPS |
+-				VIN_VNMC_VUP);
++	if ((status_of_int & VIN_VNIE_MASK) == 0) {
++		switch (pcdev->field) {
++		case V4L2_FIELD_TOP:
++			field = VIN_VNMC_IM_ODD;
+ 			break;
+-		case V4L2_PIX_FMT_UYVY:
+-			vin_write(pcdev, V0DMR,
+-				vin_read(pcdev, V0DMR) & ~VIN_VNDMR_BPSM);
+-			vin_write(pcdev, V0MC,
+-				vin_read(pcdev, V0MC) |
+-				VIN_VNMC_ME | VIN_VNMC_BPS |
+-				VIN_VNMC_VUP);
++		case V4L2_FIELD_BOTTOM:
++			field = VIN_VNMC_IM_EVEN;
+ 			break;
+-		case V4L2_PIX_FMT_RGB565:
+-			vin_write(pcdev, V0DMR,
+-				vin_read(pcdev, V0DMR) & ~VIN_VNDMR_BPSM);
+-			vin_write(pcdev, V0MC,
+-				(vin_read(pcdev, V0MC) & (~VIN_VNMC_BPS)) |
+-				VIN_VNMC_ME | VIN_VNMC_VUP);
++		case V4L2_FIELD_INTERLACED:
++		case V4L2_FIELD_INTERLACED_TB:
++			field = VIN_VNMC_IM_FULL;
++			break;
++		case V4L2_FIELD_INTERLACED_BT:
++			field = VIN_VNMC_IM_FULL;
+ 			break;
+ 		default:
+-		printk(KERN_ALERT "<WARNNING msg=\"Invalid fourcc\" fourcc=\"0x%x\"/>\n",
+-			icd->current_fmt->host_fmt->fourcc);
++			field = VIN_VNMC_IM_ODD;
+ 			break;
+ 		}
++		vin_write(pcdev, V0MC,
++			  (vin_read(pcdev, V0MC) & ~VIN_VNMC_FIELD_MASK) | field);
++	}
++
++	/* start capture */
++	switch (icd->current_fmt->host_fmt->fourcc) {
++	case V4L2_PIX_FMT_NV16:
++	case V4L2_PIX_FMT_YUYV:
++		vin_write(pcdev, V0DMR,
++			vin_read(pcdev, V0DMR) | VIN_VNDMR_BPSM);
++		vin_write(pcdev, V0MC,
++			vin_read(pcdev, V0MC) |
++			VIN_VNMC_ME | VIN_VNMC_BPS |
++			VIN_VNMC_VUP);
++		break;
++	case V4L2_PIX_FMT_UYVY:
++		vin_write(pcdev, V0DMR,
++			vin_read(pcdev, V0DMR) & ~VIN_VNDMR_BPSM);
++		vin_write(pcdev, V0MC,
++			vin_read(pcdev, V0MC) |
++			VIN_VNMC_ME | VIN_VNMC_BPS |
++			VIN_VNMC_VUP);
++		break;
++	case V4L2_PIX_FMT_RGB565:
++		vin_write(pcdev, V0DMR,
++			vin_read(pcdev, V0DMR) & ~VIN_VNDMR_BPSM);
++		vin_write(pcdev, V0MC,
++			(vin_read(pcdev, V0MC) & (~VIN_VNMC_BPS)) |
++			VIN_VNMC_ME | VIN_VNMC_VUP);
++		break;
++	default:
++	printk(KERN_ALERT "<WARNNING msg=\"Invalid fourcc\" fourcc=\"0x%x\"/>\n",
++		icd->current_fmt->host_fmt->fourcc);
++		break;
++	}
++
++	if (pcdev->vb_count >= CONT_TRANS) {
++		/* single transfer ON */
++		vin_write(pcdev, V0FC, VIN_VNFC_C_FRAME);
++	} else {
++		/* continuous transfer ON */
+ 		vin_write(pcdev, V0FC, VIN_VNFC_S_FRAME);
+ 	}
+ 
+ 	/* enable interrupt */
+ 	vin_write(pcdev, V0IE, VIN_VNIE_MASK);
+ 
+-	pcdev->active->state = VIDEOBUF_ACTIVE;
+-
+ 	return ret;
+ }
+ 
++static void rcar_vin_deinit_capture(struct rcar_vin_dev *pcdev)
++{
++	/* continuous & single transfer OFF */
++	vin_write(pcdev, V0FC, 0);
++
++	/* disable capture (release DMA buffer), reset */
++	vin_write(pcdev, V0MC, vin_read(pcdev, V0MC) & ~VIN_VNMC_ME);
++}
++
+ static int rcar_vin_videobuf_prepare(struct videobuf_queue *vq,
+ 					  struct videobuf_buffer *vb,
+ 					  enum v4l2_field field)
+@@ -515,24 +540,47 @@ static void rcar_vin_videobuf_queue(struct videobuf_queue *vq,
+ 	struct soc_camera_device *icd = vq->priv_data;
+ 	struct soc_camera_host *ici = to_soc_camera_host(icd->dev.parent);
+ 	struct rcar_vin_dev *pcdev = ici->priv;
++	dma_addr_t phys_addr_top;
++	struct videobuf_buffer *queue_vb;
+ 
+ 	dev_dbg(icd->dev.parent, "%s (vb=0x%p) 0x%08lx %zd\n", __func__,
+ 		vb, vb->baddr, vb->bsize);
+ 
+ 	vb->state = VIDEOBUF_QUEUED;
+-	list_add_tail(&vb->queue, &pcdev->capture);
++	if (pcdev->vb_count >= CONT_TRANS) { /* continuous transfer */
++		if (pcdev->mb_cnt >= MB_NUM) { /* add queue */
++			list_add_tail(&vb->queue, &pcdev->capture);
++			pcdev->queue_cnt++;
++		} else {
++			queue_vb = vb;
++			phys_addr_top = videobuf_to_dma_contig(queue_vb);
++			vin_write(pcdev, (V0MB1 + (BUF_OFF * pcdev->set_pos)),
++				 phys_addr_top);
++			pcdev->queue_buf[pcdev->set_pos] = queue_vb;
++			/* increment set_pos  */
++			pcdev->set_pos = (pcdev->set_pos + 1) % MB_NUM;
++			pcdev->mb_cnt++;
++		}
+ 
+-	if (!pcdev->active) {
+-		int status = 0;
+-		status = vin_get_status(pcdev);
+-		/*
+-		 * Because there were no active buffer at this moment,
+-		 * we are not interested in the return value of
+-		 * rcar_vin_capture here.
+-		 */
+-		pcdev->active = vb;
+-		rcar_vin_capture(pcdev);
++		if ((pcdev->first_op == FLAG_OFF) && ((pcdev->mb_cnt +
++			 pcdev->queue_cnt) == pcdev->vb_count)) {
++			rcar_vin_capture(pcdev);
++			pcdev->first_op = FLAG_ON;
++		}
++	} else { /* single transfer */
++		if (pcdev->mb_cnt >= 1) { /* add queue */
++			list_add_tail(&vb->queue, &pcdev->capture);
++			pcdev->queue_cnt++;
++		} else {
++			queue_vb = vb;
++			phys_addr_top = videobuf_to_dma_contig(queue_vb);
++			vin_write(pcdev, V0MB1, phys_addr_top);
++			pcdev->queue_buf[SINGLE_BUF] = queue_vb;
++			pcdev->mb_cnt++;
++			rcar_vin_capture(pcdev);
++		}
+ 	}
++	pcdev->disable_on = 0;
+ }
+ 
+ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+@@ -541,25 +589,35 @@ static void rcar_vin_videobuf_release(struct videobuf_queue *vq,
+ 	struct soc_camera_device *icd = vq->priv_data;
+ 	struct soc_camera_host *ici = to_soc_camera_host(icd->dev.parent);
+ 	struct rcar_vin_dev *pcdev = ici->priv;
+-	unsigned long flags;
++	unsigned long flags, i;
+ 
+ 	spin_lock_irqsave(&pcdev->lock, flags);
+ 
+-	if (pcdev->active == vb) {
+-		/* disable capture (release DMA buffer), reset */
+-		vin_write(pcdev, V0MC, vin_read(pcdev, V0MC) & ~VIN_VNMC_ME);
+-
+-		/* disable interrupt */
+-		vin_write(pcdev, V0IE, 0x00000000);
++	if (pcdev->first_op == FLAG_ON) {
++		rcar_vin_deinit_capture(pcdev);
++		pcdev->wait_capture_stop = FLAG_ON;
++		if ((vin_read(pcdev, V0MS) & VIN_VNMS_CA) == VIN_VNMS_CA) {
++			spin_unlock_irqrestore(&pcdev->lock, flags);
++			wait_for_completion(&pcdev->capture_stop);
++			spin_lock_irqsave(&pcdev->lock, flags);
++		}
++		pcdev->first_op = FLAG_OFF;
++	}
+ 
+-		pcdev->active = NULL;
++	for (i = 0; i < MB_NUM; i++) {
++		if (pcdev->queue_buf[i] == vb) {
++			pcdev->mb_cnt--;
++			/* increment get_pos  */
++			pcdev->get_pos = (pcdev->get_pos + 1) % MB_NUM;
++			pcdev->queue_buf[i] = NULL;
++		}
+ 	}
+ 
+-	if ((vb->state == VIDEOBUF_ACTIVE || vb->state == VIDEOBUF_QUEUED) &&
+-	    !list_empty(&vb->queue)) {
++	if (!list_empty(&vb->queue) && (vb->state == VIDEOBUF_QUEUED)) {
+ 		vb->state = VIDEOBUF_ERROR;
+ 		list_del_init(&vb->queue);
+ 	}
++	pcdev->queue_cnt = 0;
+ 
+ 	spin_unlock_irqrestore(&pcdev->lock, flags);
+ 
+@@ -576,30 +634,80 @@ static struct videobuf_queue_ops rcar_vin_videobuf_ops = {
+ static irqreturn_t rcar_vin_irq(int irq, void *data)
+ {
+ 	struct rcar_vin_dev *pcdev = data;
+-	struct videobuf_buffer *vb;
+ 	unsigned long flags;
++	u32 status_of_int, ms_fbs;
++	dma_addr_t phys_addr_top;
++	struct videobuf_buffer *next_queue_vb;
+ 
+ 	spin_lock_irqsave(&pcdev->lock, flags);
+-	vb = pcdev->active;
+-	if (!vb)
+-		/* Stale interrupt from a released buffer */
+-		goto out;
+ 
+-	list_del_init(&vb->queue);
+-
+-	if (!list_empty(&pcdev->capture))
+-		pcdev->active = list_entry(pcdev->capture.next,
+-					   struct videobuf_buffer, queue);
+-	else
+-		pcdev->active = NULL;
++	/* clear interrupt */
++	status_of_int = vin_read(pcdev, V0INTS);
++	vin_write(pcdev, V0INTS, status_of_int);
+ 
+-	vb->state = (rcar_vin_capture(pcdev) < 0) ?
+-		VIDEOBUF_ERROR : VIDEOBUF_DONE;
+-	do_gettimeofday(&vb->ts);
+-	vb->field_count++;
+-	wake_up(&vb->done);
++	if (pcdev->wait_capture_stop == FLAG_ON) { /* for wait_for_completion
++							 in release func */
++		complete(&pcdev->capture_stop);
++		pcdev->wait_capture_stop = FLAG_OFF;
++	} else if (pcdev->vb_count >= CONT_TRANS) { /* continuous transfer */
++
++		ms_fbs = (vin_get_status(pcdev) & MB_MASK) >> 3;
++
++		/* wait until get_pos and mb_status become equal */
++		while (((pcdev->get_pos + MB_NUM - 1) % MB_NUM) != ms_fbs) {
++			pcdev->queue_buf[pcdev->get_pos]->field_count++;
++			pcdev->queue_buf[pcdev->get_pos]->state = VIDEOBUF_DONE;
++			do_gettimeofday(&pcdev->queue_buf[pcdev->get_pos]->ts);
++			wake_up(&pcdev->queue_buf[pcdev->get_pos]->done);
++			pcdev->mb_cnt--;
++			pcdev->queue_buf[pcdev->get_pos] = NULL;
++			/* increment get_pos  */
++			pcdev->get_pos = (pcdev->get_pos + 1) % MB_NUM;
++			/* set next frame addr */
++			if (!list_empty(&pcdev->capture)) {
++				next_queue_vb = list_entry(pcdev->capture.next,
++					 struct videobuf_buffer, queue);
++				list_del_init(&next_queue_vb->queue);
++				pcdev->queue_cnt--;
++				pcdev->queue_buf[pcdev->set_pos]
++					 = next_queue_vb;
++				phys_addr_top =
++					 videobuf_to_dma_contig(next_queue_vb);
++				vin_write(pcdev, (V0MB1 + (BUF_OFF *
++					 pcdev->set_pos)), phys_addr_top);
++				/* increment set_pos */
++				pcdev->set_pos = (pcdev->set_pos + 1) % MB_NUM;
++				pcdev->mb_cnt++;
++				/* stop operation */
++				if (pcdev->queue_cnt == 0) {
++					rcar_vin_deinit_capture(pcdev);
++					pcdev->disable_on = FLAG_ON;
++					pcdev->first_op = FLAG_OFF;
++				}
++			}
++		}
++	} else { /* single transfer operation */
++		pcdev->queue_buf[SINGLE_BUF]->field_count++;
++		pcdev->queue_buf[SINGLE_BUF]->state = VIDEOBUF_DONE;
++		do_gettimeofday(&pcdev->queue_buf[SINGLE_BUF]->ts);
++		wake_up(&pcdev->queue_buf[SINGLE_BUF]->done);
++		pcdev->mb_cnt--;
++		pcdev->queue_buf[SINGLE_BUF] = NULL;
++		/* set next frame addr */
++		if (!list_empty(&pcdev->capture)) {
++			next_queue_vb = list_entry(pcdev->capture.next,
++				 struct videobuf_buffer, queue);
++			list_del_init(&next_queue_vb->queue);
++			pcdev->queue_cnt--;
++			pcdev->queue_buf[SINGLE_BUF] = next_queue_vb;
++			phys_addr_top =
++				 videobuf_to_dma_contig(next_queue_vb);
++			vin_write(pcdev, V0MB1, phys_addr_top);
++			rcar_vin_capture(pcdev);
++			pcdev->mb_cnt++;
++		}
++	}
+ 
+-out:
+ 	spin_unlock_irqrestore(&pcdev->lock, flags);
+ 
+ 	return IRQ_HANDLED;
+@@ -635,7 +743,7 @@ static void rcar_vin_remove_device(struct soc_camera_device *icd)
+ {
+ 	struct soc_camera_host *ici = to_soc_camera_host(icd->dev.parent);
+ 	struct rcar_vin_dev *pcdev = ici->priv;
+-	unsigned long flags;
++	unsigned long flags, i;
+ 
+ 	BUG_ON(icd != pcdev->icd);
+ 
+@@ -647,12 +755,16 @@ static void rcar_vin_remove_device(struct soc_camera_device *icd)
+ 
+ 	/* make sure active buffer is canceled */
+ 	spin_lock_irqsave(&pcdev->lock, flags);
+-	if (pcdev->active) {
+-		list_del(&pcdev->active->queue);
+-		pcdev->active->state = VIDEOBUF_ERROR;
+-		wake_up_all(&pcdev->active->done);
+-		pcdev->active = NULL;
++
++	for (i = 0; i < MB_NUM; i++) {
++		if (pcdev->queue_buf[i]) {
++			list_del(&pcdev->queue_buf[i]->queue);
++			pcdev->queue_buf[i]->state = VIDEOBUF_ERROR;
++			wake_up_all(&pcdev->queue_buf[i]->done);
++			pcdev->queue_buf[i] = NULL;
++		}
+ 	}
++
+ 	spin_unlock_irqrestore(&pcdev->lock, flags);
+ 
+ #ifdef CONFIG_PM
+@@ -1366,7 +1478,7 @@ static int rcar_vin_set_crop(struct soc_camera_device *icd,
+ 	struct v4l2_subdev *sd = soc_camera_to_subdev(icd);
+ 	struct device *dev = icd->dev.parent;
+ 	struct v4l2_mbus_framefmt mf;
+-	u32 vnmc;
++	u32 vnmc, i;
+ 	int ret;
+ 
+ 	dev_geo(dev, "S_CROP(%ux%u@%u:%u)\n", rect->width, rect->height,
+@@ -1422,8 +1534,12 @@ static int rcar_vin_set_crop(struct soc_camera_device *icd,
+ 		cam->vin_left, cam->vin_top);
+ 
+ 	/* Restore capture */
+-	if (pcdev->active)
+-		vnmc |= VIN_VNMC_ME;
++	for (i = 0; i < MB_NUM; i++) {
++		if ((pcdev->queue_buf[i]) && (pcdev->disable_on == 0)) {
++			vnmc |= VIN_VNMC_ME;
++			break;
++		}
++	}
+ 	capture_restore(pcdev, vnmc);
+ 
+ 	/* Even if only camera cropping succeeded */
+@@ -1880,11 +1996,8 @@ static int __devinit rcar_vin_probe(struct platform_device *pdev)
+ 	struct rcar_vin_dev *pcdev;
+ 	struct resource *res;
+ 	void __iomem *base;
+-	unsigned int irq;
++	unsigned int irq, i;
+ 	int err = 0;
+-	dma_addr_t dma_handle;
+-	void *buf;
+-	unsigned long memsize;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	irq = platform_get_irq(pdev, 0);
+@@ -1924,6 +2037,14 @@ static int __devinit rcar_vin_probe(struct platform_device *pdev)
+ 	pcdev->irq = irq;
+ 	pcdev->base = base;
+ 	pcdev->video_limit = 0; /* only enabled if second resource exists */
++	pcdev->mb_cnt = 0;
++	pcdev->disable_on = FLAG_OFF;
++	pcdev->queue_cnt = 0;
++	pcdev->set_pos = 0;
++	pcdev->get_pos = 0;
++	init_completion(&pcdev->capture_stop);
++	for (i = 0; i < MB_NUM; i++)
++		pcdev->queue_buf[i] = NULL;
+ 
+ #if RCARVIN_SUPPORT_TO_CHECK_REGS
+ 	if (rcar_vin_test_of_reg(pcdev, 0) < 0)
+@@ -1945,36 +2066,6 @@ static int __devinit rcar_vin_probe(struct platform_device *pdev)
+ 		}
+ 
+ 		pcdev->video_limit = resource_size(res);
+-	} else {
+-		char *name = "VIN";
+-
+-		memsize = 0x100000*4; /* 1Mbyte x 4*/
+-
+-		buf = dma_alloc_coherent(NULL, memsize, &dma_handle,
+-			 GFP_KERNEL);
+-		if (!buf) {
+-			pr_warning("%s: unable to allocate memory\n", name);
+-			err = -ENOMEM;
+-			goto exit_iounmap;
+-		}
+-
+-		memset(buf, 0, memsize);
+-
+-		err = dma_declare_coherent_memory(&pdev->dev, dma_handle,
+-						  dma_handle,
+-						  memsize,
+-						  DMA_MEMORY_MAP |
+-						  DMA_MEMORY_EXCLUSIVE);
+-		if (!err) {
+-			dev_err(&pdev->dev, "Unable to declare VIN memory.\n");
+-			err = -ENXIO;
+-			goto exit_iounmap;
+-		}
+-
+-		pcdev->video_limit = memsize;
+-
+-		pcdev->dma_handle = dma_handle;
+-		pcdev->vaddr = buf;
+ 	}
+ 
+ 	/* request irq */
+@@ -2009,12 +2100,8 @@ exit_free_clk:
+ #endif /* CONFIG_PM */
+ 	free_irq(pcdev->irq, pcdev);
+ exit_release_mem:
+-	if (platform_get_resource(pdev, IORESOURCE_MEM, 1)) {
++	if (platform_get_resource(pdev, IORESOURCE_MEM, 1))
+ 		dma_release_declared_memory(&pdev->dev);
+-	} else {
+-		dma_free_coherent(&pdev->dev, pcdev->video_limit,
+-			pcdev->vaddr, pcdev->dma_handle);
+-	}
+ exit_iounmap:
+ 	iounmap(base);
+ exit_kfree:
+@@ -2035,12 +2122,8 @@ static int __devexit rcar_vin_remove(struct platform_device *pdev)
+ 	pm_runtime_disable(&pdev->dev);
+ #endif /* CONFIG_PM */
+ 	free_irq(pcdev->irq, pcdev);
+-	if (platform_get_resource(pdev, IORESOURCE_MEM, 1)) {
++	if (platform_get_resource(pdev, IORESOURCE_MEM, 1))
+ 		dma_release_declared_memory(&pdev->dev);
+-	} else {
+-		dma_free_coherent(&pdev->dev, pcdev->video_limit,
+-			pcdev->vaddr, pcdev->dma_handle);
+-	}
+ 	iounmap(pcdev->base);
+ 	kfree(pcdev);
+ 	return 0;
+-- 
+1.7.0.4
+
