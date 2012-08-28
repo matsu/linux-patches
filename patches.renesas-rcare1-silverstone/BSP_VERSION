@@ -1,7 +1,7 @@
-VERSION: ??? (before v023)
+VERSION: v030
 HEAD: 
-commit bd98ea74c38c5e799642172802c826e2a929ac59
+commit f10f13d264fa63a96cb520b12af70f59a5495aea
 Author: Kouei Abe <kouei.abe.cp@rms.renesas.com>
-Date:   Tue Aug 30 15:35:16 2011 +0900
+Date:   Sun Mar 18 18:57:03 2012 +0900
 
-    sound: soc: rcar: Fix inverted stereo
+    Remove white-space
