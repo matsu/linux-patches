@@ -1,0 +1,159 @@
+From d173da0b9b139725051045af68389dca209a0822 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 14 Jun 2012 19:48:16 +0900
+Subject: [PATCH 45/80] rcarvin: enable the RGB pass through input mode for 12/18/24-bit bus, RGB-666/888
+
+This enables the RGB pass through input mode to support 12/18/24-bit bus,
+RGB-666/888 input.
+These RGB inputs can be converted into ARGB-8888 output (the alpha bit is 0).
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |   45 +++++++++++++++++++++++++++++++----------
+ 1 files changed, 34 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 9c78a4f..15dfaf2 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -156,6 +156,8 @@ struct rcar_vin_dev {
+ 
+ 	enum v4l2_field field;
+ 
++	bool data_through;
++
+ 	/* physical address for video capture memory */
+ 	dma_addr_t dma_handle;
+ 	/* virtual address for video capture memory */
+@@ -333,8 +335,11 @@ static void free_buffer(struct videobuf_queue *vq,
+ /* VnMC */
+ #define VIN_VNMC_FOC         (0x00200000) /* Field Order Control */
+ #define VIN_VNMC_YCAL        (0x00080000) /* YCbCr-422 input data ALignment */
++#define VIN_VNMC_RTM         (0x00001000) /* RGB data through input mode */
+ #define VIN_VNMC_VUP         (0x00000400) /* Vin register UPdate control */
+ #define VIN_VNMC_INF_YUV16   (0x00050000) /* ITU-R BT.1358/16bit/YUV-422 */
++#define VIN_VNMC_INF_RGB888  (0x00060000) /* ITU-R BT.601/12 or 24bit/RGB-888 */
++#define VIN_VNMC_INF_RGB666  (0x00070000) /* ITU-R BT.601/18bit/RGB-666 */
+ 
+ #define VIN_VNMC_IM_MASK     (0x00000018) /* Interlace Mode */
+ #define VIN_VNMC_IM_ODD      (0x00000000)
+@@ -438,6 +443,17 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 
+ 	/* set input interface */
+ 	switch (icd->current_fmt->code) {
++	case V4L2_MBUS_FMT_RGB888_1X24_LE:
++	case V4L2_MBUS_FMT_RGB888_2X12_LE:
++		/* BT.601 12 or 24bit RGB-888 */
++		/* FIXME: BT.709 RGB-888 must be also supported. */
++		mc |= VIN_VNMC_INF_RGB888;
++		break;
++	case V4L2_MBUS_FMT_RGB666_1X18_LE:
++		/* BT.601 18bit RGB-666 */
++		/* FIXME: BT.709 RGB-666 must be also supported. */
++		mc |= VIN_VNMC_INF_RGB666;
++		break;
+ 	case V4L2_MBUS_FMT_YUYV8_1X16_BE:
+ 		/* BT.1358 16bit YCbCr-422 */
+ 		mc |= VIN_VNMC_INF_YUV16;
+@@ -473,6 +489,10 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 		dmr = 0;
+ 		mc |= VIN_VNMC_VUP;
+ 		break;
++	case V4L2_PIX_FMT_RGB32:
++		dmr = 0;
++		mc |= VIN_VNMC_RTM | VIN_VNMC_VUP | VIN_VNMC_BPS;
++		break;
+ 	default:
+ 	printk(KERN_ALERT "<WARNNING msg=\"Invalid fourcc\" fourcc=\"0x%x\"/>\n",
+ 		icd->current_fmt->host_fmt->fourcc);
+@@ -861,6 +881,7 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 	struct rcar_vin_cam *cam = icd->host_priv;
+ 	struct rcar_vin_dev *pcdev = ici->priv;
+ 	unsigned int left_offset, top_offset;
++	unsigned char dsize;
+ 	struct v4l2_rect *cam_subrect = &cam->subrect;
+ 
+ 	dev_geo(icd->dev.parent, "Crop %ux%u@%u:%u\n",
+@@ -869,6 +890,8 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 	left_offset	= cam->vin_left;
+ 	top_offset	= cam->vin_top;
+ 
++	dsize = pcdev->data_through ? 1 : 0;
++
+ 	dev_geo(icd->dev.parent, "Cam %ux%u@%u:%u\n",
+ 		cam->width, cam->height, cam->vin_left, cam->vin_top);
+ 	dev_geo(icd->dev.parent, "Cam subrect %ux%u@%u:%u\n",
+@@ -877,8 +900,8 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 
+ 	/* Set Pre-Clip and Post-Clip areas */
+ 	/* Set Pre-Clip */
+-	vin_write(pcdev, V0SPPrC, left_offset);
+-	vin_write(pcdev, V0EPPrC, left_offset + cam->width - 1);
++	vin_write(pcdev, V0SPPrC, left_offset << dsize);
++	vin_write(pcdev, V0EPPrC, (left_offset + cam->width - 1) << dsize);
+ 	if ((pcdev->field == V4L2_FIELD_INTERLACED) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_TB) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_BT)) {
+@@ -896,7 +919,7 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 	/* Set Post-Clip */
+ 	vin_write(pcdev, V0SPPoC, 0);
+ 	vin_write(pcdev, V0SLPoC, 0);
+-	vin_write(pcdev, V0EPPoC, cam_subrect->width - 1);
++	vin_write(pcdev, V0EPPoC, (cam_subrect->width - 1) << dsize);
+ 	if ((pcdev->field == V4L2_FIELD_INTERLACED) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_TB) ||
+ 		(pcdev->field == V4L2_FIELD_INTERLACED_BT))
+@@ -904,7 +927,7 @@ static int rcar_vin_set_rect(struct soc_camera_device *icd)
+ 	else
+ 		vin_write(pcdev, V0ELPoC, cam_subrect->height - 1);
+ 
+-	vin_write(pcdev, V0IS, ((cam->width + 15) & ~0xf));
++	vin_write(pcdev, V0IS, ((cam->width << dsize) + 15) & ~0xf);
+ 
+ 	return 0;
+ }
+@@ -1156,6 +1179,9 @@ static int rcar_vin_get_formats(struct soc_camera_device *icd, unsigned int idx,
+ 		cam->extra_fmt = NULL;
+ 
+ 	switch (code) {
++	case V4L2_MBUS_FMT_RGB888_1X24_LE:
++	case V4L2_MBUS_FMT_RGB888_2X12_LE:
++	case V4L2_MBUS_FMT_RGB666_1X18_LE:
+ 	case V4L2_MBUS_FMT_YUYV8_1X16_BE:
+ 	case V4L2_MBUS_FMT_YUYV8_2X8_BE:
+ 		if (cam->extra_fmt)
+@@ -1676,6 +1702,7 @@ static int rcar_vin_set_fmt(struct soc_camera_device *icd,
+ 	u16 scale_v, scale_h;
+ 	int ret;
+ 	bool can_scale;
++	bool data_through;
+ 	enum v4l2_field field;
+ 
+ 	dev_geo(dev, "S_FMT(pix=0x%x, %ux%u)\n",
+@@ -1709,13 +1736,8 @@ static int rcar_vin_set_fmt(struct soc_camera_device *icd,
+ 	mf.colorspace	= pix->colorspace;
+ 	mf.code		= xlate->code;
+ 
+-	switch (pixfmt) {
+-	case V4L2_PIX_FMT_NV16:
+-		can_scale = false;
+-		break;
+-	default:
+-		can_scale = true;
+-	}
++	data_through = (pixfmt == V4L2_PIX_FMT_RGB32);
++	can_scale = (!data_through && (pixfmt != V4L2_PIX_FMT_NV16));
+ 
+ 	dev_geo(dev, "4: request camera output %ux%u\n", mf.width, mf.height);
+ 
+@@ -1773,6 +1795,7 @@ static int rcar_vin_set_fmt(struct soc_camera_device *icd,
+ 	icd->current_fmt	= xlate;
+ 
+ 	pcdev->field = field;
++	pcdev->data_through = data_through;
+ 
+ 	return 0;
+ }
+-- 
+1.7.0.4
+
