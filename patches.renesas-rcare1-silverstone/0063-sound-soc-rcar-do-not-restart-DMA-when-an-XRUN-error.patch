@@ -1,0 +1,85 @@
+From 0241c9dfd8ceb4f0545faf5904f1eba59398547f Mon Sep 17 00:00:00 2001
+From: Hideki EIRAKU <hdk@igel.co.jp>
+Date: Fri, 6 Apr 2012 17:30:09 +0900
+Subject: [PATCH 63/80] sound: soc: rcar: do not restart DMA when an XRUN error occurs
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ sound/soc/rcar/sss_pcm.c |   17 +++++++++++++----
+ sound/soc/rcar/sss_pcm.h |    1 +
+ 2 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/rcar/sss_pcm.c b/sound/soc/rcar/sss_pcm.c
+index b39765f..1e772a7 100644
+--- a/sound/soc/rcar/sss_pcm.c
++++ b/sound/soc/rcar/sss_pcm.c
+@@ -809,10 +809,12 @@ static void sss_dma_callback(void *data, int int_status)
+ 
+ 	snd_pcm_period_elapsed(substream);
+ 
+-	/* next dma */
+-	ret = sss_dma_control(substream);
+-	if (ret == 0)
+-		sss_dma_start(substream, DCMD_DNXT);
++	if (pcminfo->audio_running) {
++		/* next dma */
++		ret = sss_dma_control(substream);
++		if (ret == 0)
++			sss_dma_start(substream, DCMD_DNXT);
++	}
+ 
+ 	FNC_EXIT
+ 	return;
+@@ -820,6 +822,7 @@ static void sss_dma_callback(void *data, int int_status)
+ 
+ static int sss_audio_start(struct snd_pcm_substream *substream)
+ {
++	struct rcar_pcm_info *pcminfo = substream->runtime->private_data;
+ 	int ret = 0;
+ 
+ 	FNC_ENTRY
+@@ -863,15 +866,20 @@ static int sss_audio_start(struct snd_pcm_substream *substream)
+ 	if (ret == 0)
+ 		sss_ssi_start(substream);
+ 
++	pcminfo->audio_running = 1;
++
+ 	FNC_EXIT
+ 	return ret;
+ }
+ 
+ static int sss_audio_stop(struct snd_pcm_substream *substream)
+ {
++	struct rcar_pcm_info *pcminfo = substream->runtime->private_data;
+ 	int ret = 0;
+ 
+ 	FNC_ENTRY
++	pcminfo->audio_running = 0;
++
+ 	/* dma stop */
+ 	sss_dma_stop(substream);
+ 
+@@ -897,6 +905,7 @@ static struct rcar_pcm_info *sss_pcm_new_stream(int codec_id)
+ 	pcminfo->period      = 0;
+ 	pcminfo->ainfo       = &audioinfo[codec_id];
+ 	pcminfo->minfo       = &mixer_info[codec_id];
++	pcminfo->audio_running = 0;
+ 	spin_lock_init(&pcminfo->pcm_lock);
+ 
+ 	FNC_EXIT
+diff --git a/sound/soc/rcar/sss_pcm.h b/sound/soc/rcar/sss_pcm.h
+index 7432f1b..e3028fe 100644
+--- a/sound/soc/rcar/sss_pcm.h
++++ b/sound/soc/rcar/sss_pcm.h
+@@ -374,6 +374,7 @@ struct rcar_pcm_info {
+ 	spinlock_t pcm_lock;		/* for trigger process */
+ 	struct rcar_audio_info *ainfo;
+ 	struct rcar_mixer *minfo;
++	int audio_running;
+ };
+ 
+ struct rcar_audio_info {
+-- 
+1.7.0.4
+
