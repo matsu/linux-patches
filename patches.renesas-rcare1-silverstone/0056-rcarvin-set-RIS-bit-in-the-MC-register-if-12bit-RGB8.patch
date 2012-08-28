@@ -1,0 +1,39 @@
+From 3114518143d1a667c7be189719c6a9408049f446 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Fri, 20 Jul 2012 19:02:50 +0900
+Subject: [PATCH 56/80] rcarvin: set RIS bit in the MC register if 12bit RGB888 input used
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ drivers/media/video/rcarvin.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/rcarvin.c b/drivers/media/video/rcarvin.c
+index 7d6a4c4..edfc870 100644
+--- a/drivers/media/video/rcarvin.c
++++ b/drivers/media/video/rcarvin.c
+@@ -335,6 +335,7 @@ static void free_buffer(struct videobuf_queue *vq,
+ #define VIN_VNIE_ERROR_MASK  (VIN_VNIE_CEE | VIN_VNIE_FOE)
+ 
+ /* VnMC */
++#define VIN_VNMC_RIS_12BIT   (0x02000000) /* RGB Interface Select */
+ #define VIN_VNMC_FOC         (0x00200000) /* Field Order Control */
+ #define VIN_VNMC_YCAL        (0x00080000) /* YCbCr-422 input data ALignment */
+ #define VIN_VNMC_RTM         (0x00001000) /* RGB data through input mode */
+@@ -445,8 +446,11 @@ static int rcar_vin_capture(struct rcar_vin_dev *pcdev)
+ 
+ 	/* set input interface */
+ 	switch (icd->current_fmt->code) {
+-	case V4L2_MBUS_FMT_RGB888_1X24_LE:
+ 	case V4L2_MBUS_FMT_RGB888_2X12_LE:
++		/* 12bit input with rising and falling edges */
++		mc |= VIN_VNMC_RIS_12BIT;
++		/* pass through */
++	case V4L2_MBUS_FMT_RGB888_1X24_LE:
+ 		/* BT.601 12 or 24bit RGB-888 */
+ 		/* FIXME: BT.709 RGB-888 must be also supported. */
+ 		mc |= VIN_VNMC_INF_RGB888;
+-- 
+1.7.0.4
+
