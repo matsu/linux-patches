@@ -1,0 +1,78 @@
+From 9314023d0eafcb107e7be32336d7197d0d739a23 Mon Sep 17 00:00:00 2001
+From: Hideki EIRAKU <hdk@igel.co.jp>
+Date: Mon, 9 Apr 2012 15:46:15 +0900
+Subject: [PATCH 61/80] sound: soc: rcar: make pointer() return current position properly
+
+
+Signed-off-by: Katsuya Matsubara <matsu@igel.co.jp>
+---
+ sound/soc/rcar/sss_pcm.c |   14 +++++++++-----
+ sound/soc/rcar/sss_pcm.h |    1 -
+ 2 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/sound/soc/rcar/sss_pcm.c b/sound/soc/rcar/sss_pcm.c
+index 9ca4eb5..f08a8ee 100644
+--- a/sound/soc/rcar/sss_pcm.c
++++ b/sound/soc/rcar/sss_pcm.c
+@@ -805,7 +805,6 @@ static void sss_dma_callback(void *data, int int_status)
+ 	if (!substream)
+ 		return;
+ 
+-	pcminfo->tran_period++;
+ 	snd_pcm_period_elapsed(substream);
+ 
+ 	/* next dma */
+@@ -894,7 +893,6 @@ static struct rcar_pcm_info *sss_pcm_new_stream(int codec_id)
+ 	/* initialize rcar_pcm_info structure */
+ 	pcminfo->id          = codec_id;
+ 	pcminfo->period      = 0;
+-	pcminfo->tran_period = 0;
+ 	pcminfo->ainfo       = &audioinfo[codec_id];
+ 	pcminfo->minfo       = &mixer_info[codec_id];
+ 	spin_lock_init(&pcminfo->pcm_lock);
+@@ -1113,13 +1111,20 @@ static int sss_hw_free(struct snd_pcm_substream *substream)
+ 
+ static snd_pcm_uframes_t sss_pointer(struct snd_pcm_substream *substream)
+ {
++	int dir = substream->stream == SNDRV_PCM_STREAM_CAPTURE;
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct rcar_pcm_info *pcminfo = runtime->private_data;
++	struct rcar_audio_info *ainfo = pcminfo->ainfo;
++	struct hpbdma_pregs *dreg = ainfo->dmareg[dir];
+ 	snd_pcm_uframes_t position = 0;
++	u32 dma_paddr;
+ 
+-	if (pcminfo->tran_period & 1)
+-		position = runtime->period_size;
++	if (!dir)	/* playback */
++		dma_paddr = readl(&dreg->sasr);
+ 	else
++		dma_paddr = readl(&dreg->dasr);
++	position = bytes_to_frames(runtime, dma_paddr - runtime->dma_addr);
++	if (position >= runtime->buffer_size)
+ 		position = 0;
+ 
+ 	DBG_CHK_MSG("\tposition = %d\n", (u32)position);
+@@ -1132,7 +1137,6 @@ static int sss_pcm_prepare(struct snd_pcm_substream *substream)
+ 	struct rcar_pcm_info *pcminfo = substream->runtime->private_data;
+ 
+ 	pcminfo->period = 0;
+-	pcminfo->tran_period = 0;
+ 	return 0;
+ }
+ 
+diff --git a/sound/soc/rcar/sss_pcm.h b/sound/soc/rcar/sss_pcm.h
+index 98dc3a0..d69ff90 100644
+--- a/sound/soc/rcar/sss_pcm.h
++++ b/sound/soc/rcar/sss_pcm.h
+@@ -371,7 +371,6 @@ struct ssi_regs {
+ struct rcar_pcm_info {
+ 	int id;				/* DAI ID */
+ 	unsigned int period;		/* for ping-pong control */
+-	unsigned int tran_period;	/* A number of transffered period */
+ 	spinlock_t pcm_lock;		/* for trigger process */
+ 	struct rcar_audio_info *ainfo;
+ 	struct rcar_mixer *minfo;
+-- 
+1.7.0.4
+
