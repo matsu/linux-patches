@@ -1,0 +1,25 @@
+From bf163a9f1928cea97d5af4531a8e0445ac507899 Mon Sep 17 00:00:00 2001
+From: mukawa <mukawa@igel.co.jp>
+Date: Wed, 26 Sep 2012 18:07:23 +0900
+Subject: [PATCH 83/83] video: rcarfb: Fix a physical address when pan display is called
+
+---
+ drivers/video/rcarfb.c |    2 --
+ 1 files changed, 0 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index bd5c603..7d1f138 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -730,8 +730,6 @@ static int rcar_du_pan_display(struct fb_var_screeninfo *var,
+ 			/* display the area0 */
+ 			priv->offset.sx = var->xoffset;
+ 			priv->offset.sy = var->yoffset;
+-
+-			priv->planeconfig[fb_num].phys = info->fix.smem_start + info->var.yoffset * info->fix.line_length + info->var.xoffset * (info->var.bits_per_pixel/8);
+ 		} else {
+ 			return -EINVAL;
+ 		}
+-- 
+1.7.0.4
+
