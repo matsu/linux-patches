@@ -1,0 +1,83 @@
+From 003c2bb026cf0f2f8452304efb0863684877077a Mon Sep 17 00:00:00 2001
+From: Damian Hobson-Garcia <dhobsong@igel.co.jp>
+Date: Wed, 26 Sep 2012 15:34:11 +0900
+Subject: [PATCH 82/83] video: rcarfb: Properly set up double-buffering
+
+---
+ drivers/video/rcarfb.c |   22 ++++++----------------
+ 1 files changed, 6 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/video/rcarfb.c b/drivers/video/rcarfb.c
+index b5fc5f1..bd5c603 100644
+--- a/drivers/video/rcarfb.c
++++ b/drivers/video/rcarfb.c
+@@ -253,7 +253,6 @@ static void du_set_plane(struct rcar_du_priv *priv, int plane_no)
+ 	du_write(priv, P1WAMWR + (plane_no * PLANE_OFF), pl->wamwr);
+ 	du_write(priv, P1BTR + (plane_no * PLANE_OFF), pl->btr);
+ 	du_write(priv, P1MLR + (plane_no * PLANE_OFF), pl->mlr);
+-
+ }
+ 
+ 
+@@ -382,11 +381,6 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 	priv->plane[index1].moni.px = planeconfig->x;
+ 	priv->plane[index1].moni.py = planeconfig->y;
+ 
+-	priv->plane[index1].disp_area0_base =
+-		(planeconfig->phys & PnDSA_MASK);
+-	priv->plane[index1].disp_area1_base =
+-		((planeconfig->phys + offset) & PnDSA_MASK);
+-
+ 	priv->plane[index1].mem.px = DEFAULT_PnSPXR;
+ 	priv->plane[index1].mem.py = DEFAULT_PnSPYR;
+ 	priv->plane[index1].waspr = DEFAULT_PnWASPR;
+@@ -400,8 +394,8 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 	priv->plane[index1].disp_area = DISPLAY_AREA0;
+ 	priv->plane[index1].disp_area0_base =
+ 		 (planeconfig->phys & PnDSA_MASK);
+-
+-	priv->plane[index1].disp_area1_base = priv->plane[index1].disp_area0_base;
++	priv->plane[index1].disp_area1_base =
++		((planeconfig->phys + offset) & PnDSA_MASK);
+ 
+ 	/* set register */
+ 	du_set_plane(priv, index1);
+@@ -430,11 +424,6 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 		priv->plane[index2].moni.px = planeconfig->x;
+ 		priv->plane[index2].moni.py = planeconfig->y;
+ 
+-		priv->plane[index2].disp_area0_base =
+-			 (planeconfig->phys & PnDSA_MASK);
+-		//priv->plane[index2].disp_area1_base =
+-		//	 ((planeconfig->phys + offset) & PnDSA_MASK);
+-
+ 		priv->plane[index2].mem.px = DEFAULT_PnSPXR;
+ 		priv->plane[index2].mem.py = DEFAULT_PnSPYR;
+ 		priv->plane[index2].waspr = DEFAULT_PnWASPR;
+@@ -453,7 +442,8 @@ static void du_set_plane_mode_planeconfig( int fb_num, struct rcar_du_priv *priv
+ 		else
+ 			priv->plane[index2].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
+ 
+-		priv->plane[index2].disp_area1_base = priv->plane[index2].disp_area0_base;
++		priv->plane[index2].disp_area1_base =
++			 ((planeconfig->phys + offset) & PnDSA_MASK);
+ 
+ 		/* set register */
+ 		du_set_plane(priv, index2);
+@@ -705,11 +695,11 @@ static int du_update_displaystart(int fb_num, struct rcar_du_priv *priv, CarE1Pl
+ 	else {
+ 		priv->plane[index2].disp_area0_base = (planeconfig->phys & PnDSA_MASK);
+ 		du_write(priv, P1DSA0R + (index2 * PLANE_OFF), planeconfig->phys);
+-		du_write(priv, P1DSA1R + (index2 * PLANE_OFF), planeconfig->phys);
++		du_write(priv, P1DSA1R + (index2 * PLANE_OFF), (planeconfig->phys + planeconfig->pitch * planeconfig->height));
+ 	}
+ 
+ 	du_write(priv, P1DSA0R + (index1 * PLANE_OFF), planeconfig->phys);
+-	du_write(priv, P1DSA1R + (index1 * PLANE_OFF), planeconfig->phys);
++	du_write(priv, P1DSA1R + (index1 * PLANE_OFF), (planeconfig->phys + planeconfig->pitch * planeconfig->height));
+ 
+ 	/* Change frame buffer */
+ 	tmp = du_read(priv, PnMR(index1));	// FIXME: only for one plane?
+-- 
+1.7.0.4
+
