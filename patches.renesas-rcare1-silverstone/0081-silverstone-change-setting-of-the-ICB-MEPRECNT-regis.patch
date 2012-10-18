@@ -1,0 +1,26 @@
+From 275befe2ea7de56b2119a5c186554a2d69affe49 Mon Sep 17 00:00:00 2001
+From: Katsuya Matsubara <matsu@igel.co.jp>
+Date: Thu, 18 Oct 2012 19:19:14 +0900
+Subject: [PATCH 81/83] silverstone: change setting of the ICB MEPRECNT register
+
+This follows an advisory issued by Renesas on Sep. 5th, 2012.
+---
+ arch/arm/mach-rcar/board-silverstone.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-rcar/board-silverstone.c b/arch/arm/mach-rcar/board-silverstone.c
+index 5526503..3a541a7 100644
+--- a/arch/arm/mach-rcar/board-silverstone.c
++++ b/arch/arm/mach-rcar/board-silverstone.c
+@@ -846,7 +846,7 @@ static void __init silverstone_init(void)
+ 	writel(0x0018001cUL, IO_ADDRESS(0xfd050098UL));
+ 
+ 	/* ICB MEPRECNT */
+-	writel(0x0f880f0fUL, IO_ADDRESS(0xfd0500acUL));
++	writel(0x0f000f0fUL, IO_ADDRESS(0xfd0500acUL));
+ }
+ 
+ MACHINE_START(SILVERSTONE, "SILVERSTONE")
+-- 
+1.7.0.4
+
